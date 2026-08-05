@@ -58,6 +58,44 @@ command -v makepkg    >/dev/null || die "makepkg not found -- this must run on A
 command -v updpkgsums >/dev/null || die "updpkgsums not found -- install pacman-contrib"
 [[ $EUID -ne 0 ]] || die "makepkg refuses to run as root; use an unprivileged user"
 
+# --- fail early, and legibly, if the AUR cannot be reached -------------------
+# Without this the first sign of trouble is `git clone` failing inside the loop,
+# which this script cannot distinguish from "this package has no repo yet" -- so
+# it prints "creating one" and then dies at the push. That is exactly what
+# happened on the first v0.1.0 attempt, during an AUR maintenance window: a
+# misleading message followed by a bare "Could not read from remote repository".
+#
+# Skipped for --dry-run, which never touches the AUR and should work without a
+# key present.
+preflight_aur() {
+	local out
+	say "Checking AUR reachability"
+	out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+	           -o ConnectTimeout=15 aur@aur.archlinux.org help 2>&1 || true)"
+
+	case "$out" in
+		*maintenance*)
+			die "the AUR is down for maintenance. Nothing was pushed.
+
+    $out
+
+    Re-run this when it is back up." ;;
+		*"Permission denied"*)
+			die "the AUR rejected our SSH key.
+
+    Check the public half is on the AUR account (My Account -> SSH Public Key)
+    and that AUR_SSH_PRIVATE_KEY holds the matching private half, complete with
+    its trailing newline." ;;
+		*"Could not resolve"*|*"Connection timed out"*|*"Network is unreachable"*|*"Connection refused"*)
+			die "cannot reach aur.archlinux.org.
+
+    $out" ;;
+	esac
+	note "reachable and authenticated"
+}
+
+[[ "$DRY_RUN" == "1" ]] || preflight_aur
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -112,11 +150,13 @@ for pkg in "${PACKAGES[@]}"; do
 
 	# The AUR creates the repository on first push of a valid PKGBUILD +
 	# .SRCINFO, so a clone failing here is normal for a brand-new package.
+	# preflight_aur has already established that the AUR is up and our key
+	# works, so a failure at this point really does mean "no such package".
 	aur="$WORK/aur-$pkg"
 	if git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "$aur" 2>/dev/null; then
 		note "cloned existing AUR repo"
 	else
-		note "no AUR repo yet -- creating one"
+		note "no AUR repo for $pkg yet -- first push will create it"
 		git init -q "$aur"
 		git -C "$aur" remote add origin "ssh://aur@aur.archlinux.org/$pkg.git"
 	fi
