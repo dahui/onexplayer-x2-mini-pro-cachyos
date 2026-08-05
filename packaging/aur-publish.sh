@@ -147,6 +147,50 @@ for pkg in "${PACKAGES[@]}"; do
 	sed -i "s|^pkgver=.*|pkgver=$VERSION|" PKGBUILD
 	note "pkgver=$VERSION"
 
+	# Clone before generating .SRCINFO, because pkgrel is derived from what the
+	# AUR already has and .SRCINFO must carry the final value.
+	#
+	# The AUR creates the repository on first push of a valid PKGBUILD +
+	# .SRCINFO, so a clone failing here is normal for a brand-new package.
+	# preflight_aur has already established that the AUR is up and our key
+	# works, so a failure at this point really does mean "no such package".
+	aur="$WORK/aur-$pkg"
+	if [[ "$DRY_RUN" == "1" ]]; then
+		note "[dry-run] pkgrel not resolved -- that needs the AUR repo"
+	else
+		_clone() { rm -rf "$aur"; git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "$aur" 2>/dev/null; }
+		if retry "$RETRY_SHORT" "clone $pkg" _clone; then
+			note "cloned existing AUR repo"
+		else
+			note "no AUR repo for $pkg yet -- first push will create it"
+			rm -rf "$aur"
+			git init -q "$aur"
+			git -C "$aur" remote add origin "ssh://aur@aur.archlinux.org/$pkg.git"
+		fi
+
+		# pkgrel: 1 for a new pkgver, otherwise one past whatever is published.
+		#
+		# Without this, re-pushing a corrected PKGBUILD at an unchanged pkgver
+		# lands in the AUR git repo and nobody ever receives it -- pacman
+		# upgrades on the version string, which did not move. Silent no-op, and
+		# the most likely reason to re-publish at all.
+		#
+		# z13ctl derives this from the AUR RPC. Reading the cloned repo instead
+		# needs no jq, keeps working while the RPC is down, and is authoritative:
+		# it is the very file we are about to replace.
+		pkgrel=1
+		if [[ -f "$aur/PKGBUILD" ]]; then
+			old_ver="$(sed -n 's/^pkgver=//p' "$aur/PKGBUILD" | head -1)"
+			old_rel="$(sed -n 's/^pkgrel=//p' "$aur/PKGBUILD" | head -1)"
+			if [[ "$old_ver" == "$VERSION" && "$old_rel" =~ ^[0-9]+$ ]]; then
+				pkgrel=$(( old_rel + 1 ))
+				note "$VERSION already published at pkgrel=$old_rel -- bumping"
+			fi
+		fi
+		sed -i "s|^pkgrel=.*|pkgrel=$pkgrel|" PKGBUILD
+		note "pkgrel=$pkgrel"
+	fi
+
 	# Real checksums. AUR rejects SKIP for anything that is not a VCS source,
 	# and updpkgsums leaves genuine VCS sources as SKIP by itself. This is why
 	# publishing must happen AFTER the release artifacts are uploaded: it
@@ -178,21 +222,6 @@ for pkg in "${PACKAGES[@]}"; do
 		note "[dry-run] would push to ssh://aur@aur.archlinux.org/$pkg.git"
 		grep -E "^(pkgname|pkgver|pkgrel)" PKGBUILD | sed 's/^/      /'
 		continue
-	fi
-
-	# The AUR creates the repository on first push of a valid PKGBUILD +
-	# .SRCINFO, so a clone failing here is normal for a brand-new package.
-	# preflight_aur has already established that the AUR is up and our key
-	# works, so a failure at this point really does mean "no such package".
-	aur="$WORK/aur-$pkg"
-	_clone() { rm -rf "$aur"; git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "$aur" 2>/dev/null; }
-	if retry "$RETRY_SHORT" "clone $pkg" _clone; then
-		note "cloned existing AUR repo"
-	else
-		note "no AUR repo for $pkg yet -- first push will create it"
-		rm -rf "$aur"
-		git init -q "$aur"
-		git -C "$aur" remote add origin "ssh://aur@aur.archlinux.org/$pkg.git"
 	fi
 
 	# Copy what the AUR repo has to carry: the PKGBUILD, .SRCINFO, any install

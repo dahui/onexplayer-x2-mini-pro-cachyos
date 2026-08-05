@@ -142,8 +142,24 @@ left on, or run it locally on any Arch box:
 ./packaging/aur-publish.sh --version 0.1.0 --only oxp-tdpd-bin   # one package
 ```
 
-For each package the script sets `pkgver` from the tag, runs `updpkgsums`,
-regenerates `.SRCINFO`, verifies the sources, then commits and pushes.
+For each package the script sets `pkgver` from the tag, derives `pkgrel`, runs
+`updpkgsums`, regenerates `.SRCINFO`, verifies the sources, then commits and
+pushes.
+
+### `pkgrel` is derived, not committed
+
+`pkgrel` is 1 for a new `pkgver`, and one past whatever the AUR already
+publishes otherwise. This matters for the most likely reason to republish at
+all: **fixing a PKGBUILD without changing the version.** Pushed at an unchanged
+`pkgver-pkgrel`, the corrected file lands in the AUR git repo and no user ever
+receives it, because pacman upgrades on the version string and that did not
+move. A silent no-op.
+
+z13ctl derives this from the AUR RPC. Here it is read from the cloned AUR repo
+instead — no `jq` dependency, still correct while the RPC is down, and
+authoritative, since it is the very file about to be replaced. The clone
+therefore happens *before* `.SRCINFO` is generated, which has to carry the final
+value.
 
 ### Retries, because AUR git is brittle
 
