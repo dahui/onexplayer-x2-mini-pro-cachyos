@@ -1,6 +1,6 @@
 [Unit]
 Description=OneXPlayer TDP daemon (steamos-manager TdpLimit1 remote)
-Documentation=https://github.com/dahui/onexplayer-x2-mini/blob/main/docs/tdpd.md
+Documentation=https://github.com/dahui/onexplayer-x2-mini-pro-cachyos/blob/main/docs/tdpd.md
 After=dbus.service
 Requires=dbus.service
 # The SMU mailbox lives in the ryzen_smu module's sysfs; without it the daemon

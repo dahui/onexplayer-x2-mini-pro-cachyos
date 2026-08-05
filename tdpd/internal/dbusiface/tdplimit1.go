@@ -19,7 +19,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
 
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/tdp"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/tdp"
 )
 
 const (

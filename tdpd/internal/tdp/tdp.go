@@ -12,8 +12,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/config"
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/smu"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/config"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/smu"
 )
 
 // SMU MP1 message IDs for Strix Halo (family 0x1A, model 0x70), from RyzenAdj's

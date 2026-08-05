@@ -32,8 +32,8 @@ Home mapping** (InputPlumber bug). See [what's still broken](#whats-still-broken
 ## Install
 
 ```bash
-git clone https://github.com/dahui/onexplayer-x2-mini.git
-cd onexplayer-x2-mini
+git clone https://github.com/dahui/onexplayer-x2-mini-pro-cachyos.git
+cd onexplayer-x2-mini-pro-cachyos
 ./install.sh
 ```
 
@@ -48,7 +48,7 @@ Useful flags: `--skip-hdr`, `--skip-input`, `--no-deps`, `--force`.
 <summary>One-liner, if you have already read the above</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/bootstrap.sh | bash
 ```
 
 Downloads the latest release, verifies its checksum, and runs `install.sh`.

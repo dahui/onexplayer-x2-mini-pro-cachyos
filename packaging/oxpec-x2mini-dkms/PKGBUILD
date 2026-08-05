@@ -12,7 +12,7 @@
 # DKMS installs it under /updates, which takes precedence over the in-tree
 # module. Do not "fix" the mismatch between package and module name.
 
-_reponame=onexplayer-x2-mini
+_reponame=onexplayer-x2-mini-pro-cachyos
 pkgname=oxpec-x2mini-dkms
 pkgver=0.1.0
 pkgrel=1

@@ -1,4 +1,4 @@
-module github.com/dahui/onexplayer-x2-mini/tdpd
+module github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd
 
 go 1.26.5
 

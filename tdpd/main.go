@@ -23,10 +23,10 @@ import (
 
 	"github.com/coreos/go-systemd/v22/daemon"
 
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/config"
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/dbusiface"
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/smu"
-	"github.com/dahui/onexplayer-x2-mini/tdpd/internal/tdp"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/config"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/dbusiface"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/smu"
+	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/tdp"
 )
 
 // fallbackStateDir is used when systemd does not supply STATE_DIRECTORY, i.e.

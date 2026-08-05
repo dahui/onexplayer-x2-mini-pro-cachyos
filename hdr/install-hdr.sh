@@ -112,7 +112,7 @@ say "Installing systemd drop-in"
 $SUDO mkdir -p "$DROPIN_DIR"
 $SUDO tee "$DROPIN" >/dev/null <<EOF
 # Point the gamescope session at a copy patched to pass --hdr-enabled.
-# Installed by onexplayer-x2-mini; see docs/hdr.md in that repo for why.
+# Installed by onexplayer-x2-mini-pro-cachyos; see docs/hdr.md in that repo for why.
 [Service]
 ExecStart=
 ExecStart=$PATCHED

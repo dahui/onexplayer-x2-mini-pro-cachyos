@@ -11,7 +11,7 @@
 # amd_iommu=off, which costs the NPU and DMA remapping, and that is a decision
 # the user must make knowingly. post_install prints the guidance instead.
 
-_reponame=onexplayer-x2-mini
+_reponame=onexplayer-x2-mini-pro-cachyos
 pkgname=onexplayer-x2mini
 pkgver=0.1.0
 pkgrel=1

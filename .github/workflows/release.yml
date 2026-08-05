@@ -36,8 +36,8 @@ jobs:
           # Match the layout GitHub's own archive produces, so the PKGBUILDs
           # work against either.
           git archive --format=tar.gz \
-            --prefix="onexplayer-x2-mini-${VERSION}/" \
-            -o "dist/onexplayer-x2-mini-${VERSION}.tar.gz" \
+            --prefix="onexplayer-x2-mini-pro-cachyos-${VERSION}/" \
+            -o "dist/onexplayer-x2-mini-pro-cachyos-${VERSION}.tar.gz" \
             "${GITHUB_REF_NAME}"
 
       - name: Checksums
@@ -51,14 +51,14 @@ jobs:
         with:
           files: |
             dist/oxp-tdpd
-            dist/onexplayer-x2-mini-*.tar.gz
+            dist/onexplayer-x2-mini-pro-cachyos-*.tar.gz
             dist/SHA256SUMS
           body: |
             ## Install
 
             ```bash
             git clone https://github.com/${{ github.repository }}.git
-            cd onexplayer-x2-mini
+            cd onexplayer-x2-mini-pro-cachyos
             ./install.sh
             ```
 

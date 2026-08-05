@@ -23,7 +23,7 @@
 # Package name differs from upstream, but the module is still ryzen_smu.ko --
 # required, since that name is what modprobe, ryzenadj and oxp-tdpd look for.
 
-_reponame=onexplayer-x2-mini
+_reponame=onexplayer-x2-mini-pro-cachyos
 _upstream=amkillam/ryzen_smu
 _commit=1be4fb1                     # matches ryzen_smu-dkms-git 189.1be4fb1
 pkgname=ryzen-smu-x2mini-dkms

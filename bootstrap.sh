@@ -4,7 +4,7 @@
 #
 # One-liner installer for the ONEXPLAYER X2Mini PRO:
 #
-#   curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/bootstrap.sh | bash
 #
 # Downloads the latest release, verifies its checksum, and runs install.sh.
 #
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-REPO="${OXP_REPO:-dahui/onexplayer-x2-mini}"
+REPO="${OXP_REPO:-dahui/onexplayer-x2-mini-pro-cachyos}"
 TAG="${OXP_TAG:-latest}"
 API="https://api.github.com/repos/$REPO/releases/$TAG"
 
@@ -42,7 +42,7 @@ fi
 note "release: $TAG"
 
 BASE="https://github.com/$REPO/releases/download/$TAG"
-TARBALL="onexplayer-x2-mini-${TAG#v}.tar.gz"
+TARBALL="onexplayer-x2-mini-pro-cachyos-${TAG#v}.tar.gz"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -73,7 +73,7 @@ fi
 
 say "Extracting"
 tar xzf "$TARBALL"
-DIR="$(find . -maxdepth 1 -type d -name 'onexplayer-x2-mini*' | head -1)"
+DIR="$(find . -maxdepth 1 -type d -name 'onexplayer-x2-mini-pro-cachyos*' | head -1)"
 [[ -n "$DIR" && -x "$DIR/install.sh" ]] || die "unexpected tarball layout: no install.sh found"
 
 say "Running install.sh $*"
