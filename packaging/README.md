@@ -145,6 +145,27 @@ left on, or run it locally on any Arch box:
 For each package the script sets `pkgver` from the tag, runs `updpkgsums`,
 regenerates `.SRCINFO`, verifies the sources, then commits and pushes.
 
+### Retries, because AUR git is brittle
+
+Maintenance windows and transient refusals are routine — the first real v0.1.0
+push hit one. Following the same ramp as z13ctl's release pipeline: 10s, then
++5s per attempt, capped at 30s.
+
+| Operation | Attempts | Why |
+|---|---|---|
+| reachability probe | 100 (~50 min) | waits out a maintenance window |
+| `git push` | 100 (~50 min) | the step that must not be lost |
+| `git clone` | 5 (~1 min) | for a package with no AUR repo yet this **always** fails, and that is the normal first-publish path — a long retry would stall every new package for an hour before doing the right thing anyway |
+
+**A rejected SSH key is not retried.** No amount of waiting fixes a key the AUR
+will not accept, so that fails immediately with what to check.
+
+The reachability probe runs once, before any package is processed, so an outage
+means nothing is pushed at all rather than leaving one package published and two
+not. If a push still fails after all attempts, the script says which packages
+already went out and how to resume:
+`./packaging/aur-publish.sh --version X --only <pkg>`.
+
 ### Why this cannot run before the release exists
 
 `oxp-tdpd-bin` and `onexplayer-x2mini` hash the release tarball and the prebuilt

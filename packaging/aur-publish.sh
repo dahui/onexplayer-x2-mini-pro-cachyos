@@ -58,6 +58,33 @@ command -v makepkg    >/dev/null || die "makepkg not found -- this must run on A
 command -v updpkgsums >/dev/null || die "updpkgsums not found -- install pacman-contrib"
 [[ $EUID -ne 0 ]] || die "makepkg refuses to run as root; use an unprivileged user"
 
+# --- retry, because AUR git is brittle ---------------------------------------
+# Maintenance windows and transient refusals are routine; the first real v0.1.0
+# push died on one. Same ramp as z13ctl's release pipeline: 10s, then +5s per
+# attempt, capped at 30s.
+#
+# Attempt counts differ by operation on purpose. Waiting ~50 minutes through a
+# maintenance window is right for the preflight and the push, but wrong for the
+# clone: for a package with no AUR repo yet the clone ALWAYS fails, and that is
+# the normal first-publish path, so a long retry there would stall every new
+# package for an hour before doing the right thing anyway.
+retry() {
+	local attempts="$1" what="$2"; shift 2
+	local i delay
+	for (( i = 1; i <= attempts; i++ )); do
+		"$@" && return 0
+		(( i == attempts )) && break
+		delay=$(( 10 + (i - 1) * 5 ))
+		(( delay > 30 )) && delay=30
+		note "$what: attempt $i failed, retrying in ${delay}s"
+		sleep "$delay"
+	done
+	return 1
+}
+
+RETRY_LONG="${RETRY_LONG:-100}"   # ~50 min: preflight, push
+RETRY_SHORT="${RETRY_SHORT:-5}"   # ~1 min:  clone, where failure is often benign
+
 # --- fail early, and legibly, if the AUR cannot be reached -------------------
 # Without this the first sign of trouble is `git clone` failing inside the loop,
 # which this script cannot distinguish from "this package has no repo yet" -- so
@@ -67,30 +94,35 @@ command -v updpkgsums >/dev/null || die "updpkgsums not found -- install pacman-
 #
 # Skipped for --dry-run, which never touches the AUR and should work without a
 # key present.
-preflight_aur() {
+_aur_probe() {
 	local out
-	say "Checking AUR reachability"
 	out="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
 	           -o ConnectTimeout=15 aur@aur.archlinux.org help 2>&1 || true)"
 
 	case "$out" in
-		*maintenance*)
-			die "the AUR is down for maintenance. Nothing was pushed.
-
-    $out
-
-    Re-run this when it is back up." ;;
+		# Not transient -- no amount of retrying fixes a key the AUR will not
+		# accept, so fail immediately rather than burning 50 minutes.
 		*"Permission denied"*)
 			die "the AUR rejected our SSH key.
 
     Check the public half is on the AUR account (My Account -> SSH Public Key)
     and that AUR_SSH_PRIVATE_KEY holds the matching private half, complete with
     its trailing newline." ;;
+		*maintenance*)
+			note "the AUR is in maintenance"
+			return 1 ;;
 		*"Could not resolve"*|*"Connection timed out"*|*"Network is unreachable"*|*"Connection refused"*)
-			die "cannot reach aur.archlinux.org.
-
-    $out" ;;
+			note "cannot reach aur.archlinux.org"
+			return 1 ;;
 	esac
+	return 0
+}
+
+preflight_aur() {
+	say "Checking AUR reachability"
+	retry "$RETRY_LONG" "AUR probe" _aur_probe \
+		|| die "the AUR stayed unreachable. Nothing was pushed, so no package
+    was left half-published. Re-run when it is back up."
 	note "reachable and authenticated"
 }
 
@@ -153,10 +185,12 @@ for pkg in "${PACKAGES[@]}"; do
 	# preflight_aur has already established that the AUR is up and our key
 	# works, so a failure at this point really does mean "no such package".
 	aur="$WORK/aur-$pkg"
-	if git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "$aur" 2>/dev/null; then
+	_clone() { rm -rf "$aur"; git clone -q "ssh://aur@aur.archlinux.org/$pkg.git" "$aur" 2>/dev/null; }
+	if retry "$RETRY_SHORT" "clone $pkg" _clone; then
 		note "cloned existing AUR repo"
 	else
 		note "no AUR repo for $pkg yet -- first push will create it"
+		rm -rf "$aur"
 		git init -q "$aur"
 		git -C "$aur" remote add origin "ssh://aur@aur.archlinux.org/$pkg.git"
 	fi
@@ -182,7 +216,14 @@ for pkg in "${PACKAGES[@]}"; do
 	git -c user.name="${AUR_USERNAME:-Jeff Hagadorn}" \
 	    -c user.email="${AUR_EMAIL:-jeff@aletheia.io}" \
 	    commit -q -m "Update to $VERSION"
-	git push -q origin HEAD:master
+
+	# Never forced: if the remote has diverged the push is refused rather than
+	# clobbering someone else's history.
+	_push() { git push -q origin HEAD:master; }
+	retry "$RETRY_LONG" "push $pkg" _push \
+		|| die "could not push $pkg after $RETRY_LONG attempts.
+    Packages published before this one are already live; re-run with
+    --only $pkg once the AUR is back."
 	note "pushed $pkg $VERSION"
 done
 
