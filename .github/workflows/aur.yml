@@ -1,0 +1,90 @@
+name: Publish to AUR
+
+# Runs after a release is published, never on a tag directly: the PKGBUILDs
+# hash the release artifacts, so those must already be uploaded. Splitting this
+# from release.yml also means it can be re-run on its own if an AUR push fails
+# without rebuilding the release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without the leading v (e.g. 0.1.0)'
+        required: true
+      only:
+        description: 'Publish a single package (optional)'
+        required: false
+      dry_run:
+        description: 'Do everything except push'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # makepkg, updpkgsums and makepkg --printsrcinfo only exist on Arch.
+    container: archlinux:base-devel
+    steps:
+      - name: Install tooling
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
+
+      - uses: actions/checkout@v4
+
+      - name: Create build user
+        # makepkg refuses to run as root, and the container is root by default.
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure SSH for the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY secret is not set."
+            echo "Generate a key, add the public half to your AUR account, and"
+            echo "store the private half as a repository secret."
+            exit 1
+          fi
+          install -d -m 700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          # A key with a missing trailing newline fails with an error that does
+          # not mention newlines; normalise rather than debug it later.
+          chmod 600 /home/builder/.ssh/aur
+          cat > /home/builder/.ssh/config <<-EOF
+          Host aur.archlinux.org
+            User aur
+            IdentityFile /home/builder/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chown -R builder:builder /home/builder/.ssh
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${V#v}" >> "$GITHUB_OUTPUT"
+          echo "publishing version ${V#v}"
+
+      - name: Publish
+        env:
+          AUR_USERNAME: ${{ vars.AUR_USERNAME }}
+          AUR_EMAIL: ${{ vars.AUR_EMAIL }}
+        run: |
+          ARGS="--version ${{ steps.ver.outputs.version }}"
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          [ -n "${{ github.event.inputs.only }}" ] && ARGS="$ARGS --only ${{ github.event.inputs.only }}"
+          # shellcheck disable=SC2086
+          runuser -u builder -- env \
+            AUR_USERNAME="$AUR_USERNAME" AUR_EMAIL="$AUR_EMAIL" \
+            ./packaging/aur-publish.sh $ARGS

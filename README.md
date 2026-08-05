@@ -62,13 +62,14 @@ Arguments pass through: `... | bash -s -- --dry-run`.
 cd packaging/onexplayer-x2mini && makepkg -si
 ```
 
-Four packages live in [`packaging/`](packaging/): the configs, the TDP daemon,
-and the two DKMS modules. `ryzen-smu-x2mini-dkms` deliberately conflicts with
-`ryzen_smu-dkms-git` — that is what stops a package update silently reverting the
-PM table patch and breaking ryzenadj.
+Four packages live in [`packaging/`](packaging/README.md): the configs, the TDP
+daemon, and the two DKMS modules. `ryzen-smu-x2mini-dkms` deliberately conflicts
+with `ryzen_smu-dkms-git` — that is what stops a package update silently
+reverting the PM table patch and breaking ryzenadj.
 
-They are not on the AUR yet. `ryzen-smu-x2mini-dkms` is temporary and should
-disappear once its patch is upstreamed.
+Not on the AUR yet; [`packaging/README.md`](packaging/README.md) covers the
+setup and the publishing chain. `ryzen-smu-x2mini-dkms` is temporary and should
+be deleted once its patch is upstreamed.
 </details>
 
 ## Suspend needs a kernel parameter, and it costs the NPU
