@@ -30,7 +30,7 @@ conflicts=('oxpec-x2mini')
 source=('oxpec.c' 'Makefile' 'dkms.conf')
 sha256sums=('fd5c591338ef01abd7e517573cea10fc0a13595d181a5791aadec03627350067'
             '32dae33d7bf42c42e987e3b08a6793dd57527add921a39398beb3e76d942ddf1'
-            'ed828705ac2759f835accdb2cd745b9eaef84ec803f227286f065ad579ea6499')
+            'b59d2d967a2cb63adc3b49e8c90adc648924d001944ffa1dcb81226978d5aa70')
 
 package() {
 	local dest="$pkgdir/usr/src/oxpec-x2mini-$_modver"

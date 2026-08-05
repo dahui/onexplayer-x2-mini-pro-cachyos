@@ -34,7 +34,7 @@ source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')  # replaced by `updpkgsums` at release time
 
 package() {
-	cd "$srcdir/$_reponame-$pkgver"
+	cd "$srcdir/$_reponame-$pkgver" || exit 1
 
 	# steamos-manager reads only /usr/share -- it has no /etc override path, so
 	# this file is lost if the steamos-manager package ever ships its own X2Mini

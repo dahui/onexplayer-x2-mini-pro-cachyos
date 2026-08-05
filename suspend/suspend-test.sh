@@ -31,7 +31,6 @@
 set -uo pipefail
 
 LOG=/var/log/suspend-test.log
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
@@ -180,13 +179,16 @@ attempt() {
 	journalctl --sync 2>/dev/null || true
 
 	local start=$SECONDS rc=0
+	# rc is the only record of how a stage failed when the machine survives it.
+	# The two branches capture it differently on purpose: rtcwake returns real
+	# exit codes worth keeping, whereas a failed `echo` into sysfs is only ever
+	# 0 or 1, so `$?` there would carry no more information than a literal --
+	# and reads ambiguously enough that SC2320 flags it.
 	if [[ "$level" == "none" && "${AUTO:-0}" == "1" ]]; then
 		# Real suspend, unattended: the RTC alarm is the only way back.
-		rtcwake -m mem -s "${WAKE_SECS:-30}"
-		rc=$?
-	else
-		echo mem > /sys/power/state
-		rc=$?
+		rtcwake -m mem -s "${WAKE_SECS:-30}" || rc=$?
+	elif ! echo mem > /sys/power/state; then
+		rc=1
 	fi
 	local elapsed=$((SECONDS - start))
 

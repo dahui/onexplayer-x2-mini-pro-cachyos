@@ -41,7 +41,7 @@ sha256sums=('SKIP'   # replaced by `updpkgsums` at release time
 package() {
 	install -Dm755 "$srcdir/oxp-tdpd-$pkgver" "$pkgdir/usr/bin/oxp-tdpd"
 
-	cd "$srcdir/$_reponame-$pkgver"
+	cd "$srcdir/$_reponame-$pkgver" || exit 1
 
 	install -Dm644 tdpd/contrib/oxp-tdpd.service \
 		"$pkgdir/usr/lib/systemd/system/oxp-tdpd.service"

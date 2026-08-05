@@ -85,6 +85,33 @@ jobs:
           sys.exit(bad)
           PY
 
+  packages:
+    name: PKGBUILDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the self-contained packages build
+        # Only the two that source files next to the PKGBUILD; the other two
+        # hash release artifacts that do not exist until a tag is cut.
+        #
+        # This catches stale sha256sums, which is a real failure mode: editing a
+        # source file without re-running updpkgsums leaves `makepkg -si` from a
+        # clone dying on "One or more files did not pass the validity check",
+        # and install.sh uses exactly that path.
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work archlinux:base-devel bash -c '
+            set -euo pipefail
+            pacman -Syu --noconfirm --needed git
+            useradd -m builder
+            chown -R builder /work
+            for p in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
+              echo "== $p"
+              runuser -u builder -- bash -c "cd packaging/$p && makepkg --verifysource --noconfirm"
+              runuser -u builder -- bash -c "cd packaging/$p && makepkg -f --nodeps --noconfirm"
+            done
+          '
+
   go:
     name: oxp-tdpd
     runs-on: ubuntu-latest

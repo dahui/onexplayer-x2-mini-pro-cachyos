@@ -49,7 +49,7 @@ sha256sums=('SKIP'
             'db89ee33aafcbb1f0fd47fce82e7b297cb7a98e678b83c2bab2ca479b3c63fc2')
 
 prepare() {
-	cd "$srcdir/ryzen_smu"
+	cd "$srcdir/ryzen_smu" || exit 1
 	patch -p1 -i "$srcdir/0001-ryzen_smu-add-pm-table-0x64010C.patch"
 
 	# Fail loudly rather than shipping an unpatched module that would break
@@ -62,7 +62,7 @@ prepare() {
 
 package() {
 	local dest="$pkgdir/usr/src/ryzen_smu-$_modver"
-	cd "$srcdir/ryzen_smu"
+	cd "$srcdir/ryzen_smu" || exit 1
 
 	install -dm755 "$dest"
 	cp -r --no-preserve=ownership ./*.c ./*.h Makefile "$dest/" 2>/dev/null || true
