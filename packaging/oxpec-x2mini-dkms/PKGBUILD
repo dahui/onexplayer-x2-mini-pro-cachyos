@@ -1,0 +1,40 @@
+# Maintainer: Jeff Hagadorn <jeff@aletheia.io>
+#
+# Patched oxpec EC driver for the ONEXPLAYER X2Mini PRO.
+#
+# Stock oxpec has no DMI entry for this machine, so fan RPM/PWM and the battery
+# charge limit are unavailable. This adds the entry, reusing the APEX's board
+# type (oxp_fly) unchanged -- same system board.
+#
+# The package name is deliberately distinct from any upstream oxpec package, but
+# the *module* it builds is still oxpec.ko. That is required: the module name is
+# what binds the hardware and what modprobe and the shipped configs reference.
+# DKMS installs it under /updates, which takes precedence over the in-tree
+# module. Do not "fix" the mismatch between package and module name.
+
+_reponame=onexplayer-x2-mini
+pkgname=oxpec-x2mini-dkms
+pkgver=0.1.0
+pkgrel=1
+_modver=1.0
+pkgdesc="OneXPlayer EC driver (fan, charge limit) with ONEXPLAYER X2Mini PRO support - DKMS"
+arch=('any')
+url="https://github.com/dahui/$_reponame"
+license=('GPL-2.0-or-later')
+depends=('dkms')
+provides=('oxpec-x2mini')
+conflicts=('oxpec-x2mini')
+source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # replaced by `updpkgsums` at release time
+
+package() {
+	cd "$srcdir/$_reponame-$pkgver"
+
+	local dest="$pkgdir/usr/src/oxpec-x2mini-$_modver"
+	install -Dm644 oxpec/src/oxpec.c   "$dest/oxpec.c"
+	install -Dm644 oxpec/src/Makefile  "$dest/Makefile"
+	install -Dm644 oxpec/src/dkms.conf "$dest/dkms.conf"
+
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 docs/oxpec.md "$pkgdir/usr/share/doc/$pkgname/oxpec.md"
+}

@@ -1,0 +1,33 @@
+From: Jeff Hagadorn <jeff@aletheia.io>
+Subject: [PATCH] platform/x86: oxpec: add ONEXPLAYER X2Mini PRO
+
+The ONEXPLAYER X2Mini PRO ships the same system board as the ONEXPLAYER
+APEX, which is already handled as oxp_fly. The only thing that keeps the
+driver from binding is the DMI board name, so add an entry pointing at
+the same board type.
+
+Verified on the unit:
+  /sys/class/dmi/id/board_vendor -> ONE-NETBOOK
+  /sys/class/dmi/id/board_name   -> ONEXPLAYER X2Mini PRO
+
+Without this, `modprobe oxpec` fails with ENODEV and the machine has no
+route to TDP control, fan control, or a battery charge limit.
+
+Signed-off-by: Jeff Hagadorn <jeff@aletheia.io>
+---
+--- a/drivers/platform/x86/oxpec.c
++++ b/drivers/platform/x86/oxpec.c
+@@ -152,6 +152,13 @@
+ 	{
+ 		.matches = {
+ 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
++			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO"),
++		},
++		.driver_data = (void *)oxp_fly,
++	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+ 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX"),
+ 		},
+ 		.driver_data = (void *)oxp_fly,

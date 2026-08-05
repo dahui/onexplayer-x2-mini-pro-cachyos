@@ -1,0 +1,12 @@
+# Registers oxp-tdpd as steamos-manager's TDP backend.
+#
+# Format is from steamos-manager's own example,
+# steamos-manager/examples/basic_remote.rs: a section named after the interface
+# being delegated, holding the bus name and object path of the daemon that
+# implements it.
+#
+# Installed to /etc/steamos-manager/remotes.d/.
+
+[TdpLimit1]
+bus_name = "io.aletheia.OxpTdp1"
+object_path = "/io/aletheia/OxpTdp1"

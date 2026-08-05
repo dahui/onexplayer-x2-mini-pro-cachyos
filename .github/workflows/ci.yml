@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          # -x follows `source scripts/lib.sh`. Without it every helper reads as
+          # undefined and the run is pure noise.
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck -x -S warning
+
+      - name: bash -n every script
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 -n1 bash -n
+
+  configs:
+    name: Config files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: InputPlumber YAML parses
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = 0
+          for f in glob.glob('etc/inputplumber/**/*.yaml', recursive=True):
+              try:
+                  yaml.safe_load(open(f))
+                  print(f'ok   {f}')
+              except Exception as e:
+                  print(f'FAIL {f}: {e}'); bad = 1
+          sys.exit(bad)
+          PY
+
+      - name: Capability map sanity
+        run: |
+          # A capability used as a rule *source* must not also be a *target*.
+          # InputPlumber re-enqueues translated events, so that combination makes
+          # one button silently fire another's action. This cost a debugging
+          # round; it is cheap to assert.
+          python3 - <<'PY'
+          import sys, yaml
+          m = yaml.safe_load(open('etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml'))
+          srcs, tgts = set(), set()
+          for r in m['mapping']:
+              t = r['target_event'].get('gamepad', {}).get('button')
+              if t: tgts.add(t)
+              for s in r['source_events']:
+                  b = s.get('gamepad', {}).get('button') if isinstance(s, dict) else None
+                  if b: srcs.add(b)
+          clash = srcs & tgts
+          if clash:
+              print(f'FAIL: capability used as both source and target: {clash}')
+              sys.exit(1)
+          print('ok   no source/target clash')
+          PY
+
+      - name: TOML parses
+        run: |
+          python3 - <<'PY'
+          import glob, sys, tomllib
+          bad = 0
+          for f in glob.glob('**/*.toml', recursive=True):
+              try:
+                  tomllib.load(open(f, 'rb'))
+                  print(f'ok   {f}')
+              except Exception as e:
+                  print(f'FAIL {f}: {e}'); bad = 1
+          sys.exit(bad)
+          PY
+
+  go:
+    name: oxp-tdpd
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tdpd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tdpd/go.mod
+          cache-dependency-path: tdpd/go.sum
+
+      - run: gofmt -l . | tee /dev/stderr | (! read)
+      - run: go vet ./...
+      - run: go build ./...

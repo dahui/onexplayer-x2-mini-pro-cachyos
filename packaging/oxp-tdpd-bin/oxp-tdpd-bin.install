@@ -1,0 +1,46 @@
+post_install() {
+	cat <<-'EOF'
+
+	oxp-tdpd installed. To start it:
+
+	    sudo systemctl enable --now oxp-tdpd
+	    sudo systemctl restart steamos-manager
+
+	Then Steam's TDP slider should work (10-85 W). Verify with:
+
+	    steamosctl get-tdp-limit
+	    sudo oxp-tdpd --status
+
+	Read-back reports a cached value unless ryzen-smu-x2mini-dkms is
+	installed; setting limits works either way.
+
+	EOF
+}
+
+post_upgrade() {
+	# The old binary is already replaced on disk at this point, so a running
+	# service keeps executing the previous image until restarted. `enable
+	# --now` would be a no-op here, which is exactly the trap.
+	if systemctl is-active --quiet oxp-tdpd 2>/dev/null; then
+		systemctl daemon-reload
+		systemctl restart oxp-tdpd
+		echo "==> restarted oxp-tdpd onto the new binary"
+	fi
+}
+
+pre_remove() {
+	systemctl disable --now oxp-tdpd 2>/dev/null || true
+}
+
+post_remove() {
+	cat <<-'EOF'
+
+	oxp-tdpd removed. Steam's TDP slider will stop working until another
+	TdpLimit1 provider is registered.
+
+	SMU limits are not reset on removal -- whatever was last applied stays
+	in effect until reboot. There is no "restore firmware default" SMU
+	message.
+
+	EOF
+}

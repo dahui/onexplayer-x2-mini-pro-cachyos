@@ -1,0 +1,15 @@
+# OneXPlayer X2 Mini
+#
+# InputPlumber's service is shipped 'disabled' and is started on demand by
+# /usr/lib/udev/rules.d/90-inputplumber-autostart.rules, which only fires when
+# the hwdb sets USE_INPUTPLUMBER=1 for this machine's DMI modalias.
+#
+# The stock /usr/lib/udev/hwdb.d/60-inputplumber-autostart.hwdb has no entry
+# for the X2 Mini, so the service never started. This adds one.
+#
+# Local modalias:
+#   dmi:...:svnONE-NETBOOK:pnONEXPLAYERX2MiniPRO:...:rnONEXPLAYERX2MiniPRO:...
+#
+# Matched on product_name so the non-PRO X2 Mini is covered too.
+dmi:*svnONE-NETBOOK:*pnONEXPLAYERX2Mini*
+  USE_INPUTPLUMBER=1

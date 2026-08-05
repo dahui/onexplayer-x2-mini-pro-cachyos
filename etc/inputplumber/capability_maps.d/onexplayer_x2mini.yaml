@@ -1,0 +1,188 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/capability_map_v1.json
+# Schema version number
+version: 1
+
+# The type of configuration schema
+kind: CapabilityMap
+
+# Name for the device event map
+name: ONEXPLAYER X2Mini PRO
+
+# Unique identifier of the capability mapping
+id: oxpx2m
+
+# Every entry below was captured on this unit, not inherited. Method: all evdev
+# nodes and all three 1a86:fe00 hidraw interfaces were read simultaneously while
+# each button was pressed, with the Guide button (BTN_MODE on the X-Box pad) used
+# as a separator so that a button emitting *nothing* could not silently shift the
+# sequence and mislabel its neighbours.
+#
+#   Guide / Xbox   BTN_MODE on the X-Box 360 pad      -- already works, untouched
+#   Home           vendor HID, B2 frame, btn id 0x24  -- oxp_hid -> gamepad:Keyboard
+#   Keyboard       KeyLeftCtrl + KeyLeftMeta + KeyO
+#   OneXPlayer     KeyLeftCtrl + KeyLeftMeta + KeyLeftAlt
+#   Back paddles   nothing at all, on any interface   -- see the note at the end
+#
+# The two chords are identical to the APEX's oxp8 map ("KB short" and "Turbo"),
+# which is expected given the shared board. What differs is that this unit has no
+# Turbo button and no Orange button, and its Home button reports over vendor HID
+# rather than as a chord -- so oxp8's Meta+G / Meta+D / Meta+Sysrq entries match
+# nothing here and its paddle entries are dead weight.
+#
+# Targets are constrained by what the steam-deck-uhid target device can express
+# (steam_deck_uhid.rs update_state). It supports Screenshot and L4/L5/R4/R5, but
+# has NO Keyboard button -- a real Deck opens its on-screen keyboard with
+# Steam+X, so GamepadButton::Keyboard is silently dropped. Mapping anything to
+# Keyboard therefore does nothing at all; see the note at the end.
+
+mapping:
+  # Home has NO rule here, deliberately -- and unmapped is not the same as dead.
+  # It falls through to the stock device profile, which maps gamepad:Keyboard to
+  # Guide+North: Steam+X, the Deck's on-screen-keyboard shortcut. Steam's
+  # controller mapping tester confirms Home produces Steam+X.
+  #
+  # It appears to do nothing only because Steam+X does not raise the keyboard
+  # from the Steam main menu -- pressing Guide+X by hand on the physical
+  # controller does nothing there either. Verify in a text field or the mapping
+  # tester before concluding it is broken.
+  #
+  # Giving Home a *custom* target is what is blocked; doing so breaks every
+  # button pressed afterwards. See "The Home button is not mappable here" below.
+
+  # Keyboard button -> gamepad:Keyboard, which the stock device profile expands
+  # into Guide + North (Steam+X, the Deck's on-screen-keyboard shortcut).
+  # Verified in Steam's controller mapping tester. No Steam binding required.
+  #
+  # This target is only safe while nothing uses gamepad:Keyboard as a rule
+  # *source* -- see trap 2 below. Adding a Home rule would silently turn this
+  # button into whatever that rule targets.
+  #
+  # Expect a ~10 ms pulse, not a held button. The firmware taps KeyO briefly
+  # regardless of how long the button is held (measured: down 31.50s, up 31.51s),
+  # and the rule is satisfied only while all three keys are down. Steam's mapping
+  # tester shows this as a brief flash -- correct behaviour, not a dropped event.
+  #
+  # Note this makes the Keyboard and Home buttons emit the identical event; they
+  # are indistinguishable downstream. If two distinct functions are ever needed,
+  # retarget this rule to RightPaddle2 (R5) and bind that in Steam -- R5 rather
+  # than R4 so the real paddles can claim the Paddle1 slots when hid-oxp lands.
+  #
+  # R5 is free because the physical back paddles emit nothing on this unit. R5
+  # rather than R4 deliberately: when Linux 7.2's hid-oxp makes the real paddles
+  # work they will claim the Paddle1 slots (L4/R4), so parking here avoids a
+  # future collision.
+  #
+  # Requires a one-time binding: Steam -> Controller Settings -> bind R5 to
+  # "Show Keyboard". Steam has no native keyboard-button concept for Deck
+  # controllers, so this is as direct as it gets short of patching the driver.
+  #
+  # Short press only. A long press is consumed by the firmware to toggle the
+  # controller into mouse mode and never reaches the host.
+  - name: Keyboard
+    source_events:
+      - keyboard: KeyLeftCtrl
+      - keyboard: KeyLeftMeta
+      - keyboard: KeyO
+    target_event:
+      gamepad:
+        button: Keyboard
+
+  # OneXPlayer button -> Steam Quick Access Menu. Verified working.
+  # Press and long-press emit the same chord; the firmware holds it down and the
+  # only difference is autorepeat duration, so there is no separate long-press
+  # signal to bind.
+  - name: OneXPlayer
+    source_events:
+      - keyboard: KeyLeftCtrl
+      - keyboard: KeyLeftMeta
+      - keyboard: KeyLeftAlt
+    target_event:
+      gamepad:
+        button: QuickAccess
+
+# List of events to filter from the source devices
+filtered_events: []
+
+# ---------------------------------------------------------------------------
+# The Home button is not mappable here (InputPlumber 0.78.0)
+#
+# Home arrives as gamepad:Keyboard from the oxp_hid driver, which hardcodes
+# vendor button id 0x24 to GamepadButton::Keyboard -- its ButtonId enum was
+# written for the OXP X1, where that position is the KB/QAM key. On the X2Mini
+# PRO the button there is Home, verified by marker bracketing, so the enum name
+# is a misnomer, not a bug.
+#
+# Any rule using that capability as a source appears to work in isolation and
+# then corrupts everything after it. Measured, one button per press, 3s apart:
+#
+#   Home alone                  -> 1 screenshot            (correct)
+#   Home, then OneXPlayer       -> 2 screenshots           (QAM never opened)
+#   Home, then Keyboard button  -> screenshot              (R5 never emitted)
+#
+# The signature is Home's release failing to clear gamepad:Keyboard from
+# translatable_active_inputs, so the Home rule's source stays satisfied and it
+# re-fires on the next translatable press -- whatever that press was. Reading
+# composite_device/mod.rs the bookkeeping looks correct (the remove at :1279 is
+# unconditional for releases, and no guard above :735 drops release events), so
+# this is an upstream bug rather than a config error. It could not be traced
+# further from the outside: the emit-queue and active-input logs are log::trace!,
+# and Cargo.toml sets release_max_level_debug, so they are compiled out of the
+# release binary -- LOG_LEVEL=trace produces zero TRACE lines. Confirming it
+# needs a debug build of InputPlumber.
+#
+# Consequence: Home is left unmapped. Do not "fix" this by adding a Home rule
+# without re-testing the *following* button press.
+#
+# Two related traps worth knowing:
+#
+# 1. gamepad:Keyboard is a no-op on this target anyway. steam_deck_uhid.rs
+#    handles QuickAccess, Screenshot and L4/L5/R4/R5, but has no arm for Keyboard,
+#    so the event is accepted by the composite device and then silently dropped.
+#    Symptom: the button produces a correct "NativeEvent: Gamepad(Button(Keyboard))"
+#    line in the debug log and nothing whatsoever happens in Steam. If a button
+#    looks dead, check the target's update_state before suspecting this file.
+#
+# 2. A capability used as a rule *source* cannot also be a rule *target*.
+#    Sources go into translatable_capabilities, and translated events are
+#    re-enqueued (composite_device/mod.rs:729,735), so the second rule's output
+#    re-enters translation and fires the first rule. Symptom: two different
+#    buttons perform the same action. This is why the Keyboard button targets R5
+#    rather than gamepad:Keyboard.
+#
+# Enable debug logging to see the translation directly:
+#   sudo mkdir -p /run/systemd/system/inputplumber.service.d
+#   printf '[Service]\nEnvironment=LOG_LEVEL=debug\n' | \
+#     sudo tee /run/systemd/system/inputplumber.service.d/debug.conf
+#   sudo systemctl daemon-reload && sudo systemctl restart inputplumber
+# (/run so it evaporates on reboot; LOG_LEVEL=trace also logs the emit queue.)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Back paddles: absent by design, not by oversight
+#
+# Neither paddle emits anything on any interface in the device's default mode.
+# They only report once the controller is put into "full intercept" mode with a
+# vendor command on the 1a86:fe00 interface-2 hidraw node:
+#
+#   enable:   B2 3F 01 03 01 02 00...00 3F B2
+#   disable:  B2 3F 01 00 01 02 00...00 3F B2
+#
+# (frame = [cid, 0x3F, idx] + payload + zero padding + [0x3F, cid], 64 bytes)
+#
+# In that mode the paddles report as button ids 0x22 and 0x23 -- but the X-Box
+# gamepad goes completely silent, and everything (sticks, triggers, d-pad, face
+# buttons) has to be reconstructed from vendor HID. There is no mode that gives
+# paddles *and* XInput. InputPlumber 0.78's oxp_hid driver handles only four
+# button ids and has no axis support, so enabling intercept today would trade two
+# paddles for the whole controller.
+#
+# The fix is upstream: hid-oxp, a Valve-authored driver merged for Linux 7.2,
+# which manages this mode properly.
+#
+# Status as of 2026-08-04: 7.2 has NOT shipped in CachyOS. This machine runs
+# 7.1.6-1-cachyos-deckify, and a beta/mainline kernel is deliberately not a
+# prerequisite for anything in this repo. Revisit when 7.2 reaches the normal
+# CachyOS repos -- do not chase it earlier.
+#
+# Protocol credit: github.com/rmckayfleming/onexplayer-apex-cachyos
+# ---------------------------------------------------------------------------

@@ -1,0 +1,54 @@
+[[device]]
+dmi.sys_vendor = "ONE-NETBOOK"
+dmi.product_name = "ONEXPLAYER X2Mini PRO"
+device = "onexplayer_x2_mini_pro"
+variant = "X2Mini PRO"
+friendly_name = "ONEXPLAYER X2 Mini Pro"
+
+# GPU performance level -> /sys/class/drm/card1/device/power_dpm_force_performance_level
+# Present on this device, so this works.
+[gpu_performance]
+driver = "amdgpu"
+
+# Platform power profiles via amd-pmf.
+# /sys/class/platform-profile/platform-profile-0 -> name "amd-pmf",
+# choices "low-power balanced performance".
+[performance_profile]
+platform_profile_name = "amd-pmf"
+suggested_default = "balanced"
+
+# Battery charge limit via the ACPI battery hook that oxpec registers.
+# REQUIRES the patched oxpec driver (see oxpec/ in this repo) - without it
+# /sys/class/power_supply/BATT/charge_control_end_threshold does not exist and
+# this section is inert.
+[battery_charge_limit]
+method = "acpi_sb"
+
+# TDP is delegated to oxp-tdpd over D-Bus, since neither local method works on
+# this device: amdgpu_hwmon needs power1_cap (absent on this Strix Halo APU) and
+# firmware_attribute needs /sys/class/firmware-attributes (no OneXPlayer vendor
+# driver provides it). oxp-tdpd applies limits over the SMU mailbox instead.
+#
+# Registered in /etc/steamos-manager/remotes.d/oxp-tdpd.toml. Range matches what
+# OneXConsole offers. REQUIRES tdpd/ to be installed - without it steamos-manager
+# reports "No remote TDP manager".
+[tdp_limit]
+method = "remote_interface"
+
+[tdp_limit.range]
+min = 10
+max = 85
+
+[inputplumber]
+target_devices = ["deck-uhid", "keyboard", "mouse"]
+
+# Deliberately NOT configured on this device:
+#
+#   [gpu_power_profile]  - needs pp_power_profile_mode, which this APU does not
+#                          expose. Declaring it only produces DBus errors.
+#
+#
+#   [fan_speed]          - oxpec exposes fan RPM (fan1_input) and PWM (pwm1) on
+#                          hwmon "oxp_ec", but no writable fan *target* like the
+#                          Steam Deck's fan1_target that this section expects.
+#                          pwm1 is available for external fan-curve tooling.

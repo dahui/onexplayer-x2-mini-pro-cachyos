@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tdpd/go.mod
+          cache-dependency-path: tdpd/go.sum
+
+      - name: Build oxp-tdpd
+        working-directory: tdpd
+        env:
+          # Static, so the binary does not depend on the build host's libc. The
+          # daemon only touches sysfs and D-Bus, so it needs nothing from cgo.
+          CGO_ENABLED: '0'
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o ../dist/oxp-tdpd .
+          file ../dist/oxp-tdpd
+
+      - name: Create source tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Match the layout GitHub's own archive produces, so the PKGBUILDs
+          # work against either.
+          git archive --format=tar.gz \
+            --prefix="onexplayer-x2-mini-${VERSION}/" \
+            -o "dist/onexplayer-x2-mini-${VERSION}.tar.gz" \
+            "${GITHUB_REF_NAME}"
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum ./* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/oxp-tdpd
+            dist/onexplayer-x2-mini-*.tar.gz
+            dist/SHA256SUMS
+          body: |
+            ## Install
+
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd onexplayer-x2-mini
+            ./install.sh
+            ```
+
+            `oxp-tdpd` below is statically linked and built from this tag by CI.
+            Verify it against `SHA256SUMS` before use.
+
+            **Suspend needs a kernel parameter** that this installer will not set
+            for you: `amd_iommu=off mem_sleep_default=s2idle`. Without it the
+            machine hangs entering s0ix. It costs the NPU — see `docs/suspend.md`.

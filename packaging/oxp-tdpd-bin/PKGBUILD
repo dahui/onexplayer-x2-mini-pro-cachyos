@@ -1,0 +1,65 @@
+# Maintainer: Jeff Hagadorn <jeff@aletheia.io>
+#
+# oxp-tdpd: gives Steam's TDP slider a working backend on the X2Mini PRO.
+#
+# steamos-manager supports exactly two local TDP methods and both are dead ends
+# on this hardware -- amdgpu_hwmon needs power1_cap (absent on this APU) and
+# firmware_attribute needs a vendor platform driver (OneXPlayer ships none). This
+# daemon implements steamos-manager's TdpLimit1 interface and applies limits over
+# the AMD SMU mailbox instead. See docs/tdp.md.
+#
+# -bin: ships the release binary rather than building, so users need no Go
+# toolchain. It is statically linked (CGO_ENABLED=0) and built by CI from the
+# tagged source; the checksum below is what ties it to that build.
+
+_reponame=onexplayer-x2-mini
+pkgname=oxp-tdpd-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="TDP daemon for the ONEXPLAYER X2Mini PRO (steamos-manager TdpLimit1 remote)"
+arch=('x86_64')
+url="https://github.com/dahui/$_reponame"
+license=('GPL-2.0-only')
+depends=('dbus')
+# Read-back needs the patched ryzen_smu; the daemon degrades to a cached value
+# without it, so this is optional rather than a hard dependency.
+optdepends=(
+	'ryzen-smu-x2mini-dkms: TDP read-back from the SMU PM table'
+	'steamos-manager: exposes the limit through Steam'"'"'s slider'
+)
+provides=('oxp-tdpd')
+conflicts=('oxp-tdpd')
+backup=('etc/oxp-tdpd.conf')
+install="$pkgname.install"
+source=(
+	"$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+	"oxp-tdpd-$pkgver::$url/releases/download/v$pkgver/oxp-tdpd"
+)
+sha256sums=('SKIP'   # replaced by `updpkgsums` at release time
+            'SKIP')
+
+package() {
+	install -Dm755 "$srcdir/oxp-tdpd-$pkgver" "$pkgdir/usr/bin/oxp-tdpd"
+
+	cd "$srcdir/$_reponame-$pkgver"
+
+	install -Dm644 tdpd/contrib/oxp-tdpd.service \
+		"$pkgdir/usr/lib/systemd/system/oxp-tdpd.service"
+
+	# System bus policy. Note this must allow sends from the default context,
+	# not just root: it is steamos-manager's *user* daemon that proxies
+	# TdpLimit1, and restricting to root makes that daemon exit with
+	# "AccessDenied". See the comments in the file itself.
+	install -Dm644 tdpd/contrib/io.aletheia.OxpTdp1.conf \
+		"$pkgdir/usr/share/dbus-1/system.d/io.aletheia.OxpTdp1.conf"
+
+	# Registers us as steamos-manager's TdpLimit1 provider.
+	install -Dm644 tdpd/contrib/remotes.d/oxp-tdpd.toml \
+		"$pkgdir/etc/steamos-manager/remotes.d/oxp-tdpd.toml"
+
+	# In backup=(), so pacman will not clobber an edited copy.
+	install -Dm644 tdpd/contrib/oxp-tdpd.conf "$pkgdir/etc/oxp-tdpd.conf"
+
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 docs/tdpd.md "$pkgdir/usr/share/doc/$pkgname/tdpd.md"
+}

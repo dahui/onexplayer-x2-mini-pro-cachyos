@@ -1,0 +1,68 @@
+# Maintainer: Jeff Hagadorn <jeff@aletheia.io>
+#
+# Configuration for the ONEXPLAYER X2Mini PRO: steamos-manager device profile,
+# InputPlumber composite device + capability map, udev hwdb autostart trigger,
+# and the gamescope display script that enables HDR.
+#
+# This is the "everything else" package -- it pulls in the daemon and the two
+# DKMS modules, so `paru -S onexplayer-x2mini` is the single command.
+#
+# It deliberately does NOT touch the kernel command line. Suspend needs
+# amd_iommu=off, which costs the NPU and DMA remapping, and that is a decision
+# the user must make knowingly. post_install prints the guidance instead.
+
+_reponame=onexplayer-x2-mini
+pkgname=onexplayer-x2mini
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="ONEXPLAYER X2Mini PRO enablement: steamos-manager, InputPlumber, HDR and fan/charge configs"
+arch=('any')
+url="https://github.com/dahui/$_reponame"
+license=('GPL-2.0-only')
+depends=(
+	'steamos-manager'
+	'oxp-tdpd'
+	'oxpec-x2mini-dkms'
+)
+optdepends=(
+	'inputplumber: extra button mapping (OneXPlayer -> QAM, Keyboard/Home -> Steam+X)'
+	'ryzen-smu-x2mini-dkms: TDP read-back, and keeps ryzenadj working'
+	'gamescope: HDR display script'
+)
+install="$pkgname.install"
+source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # replaced by `updpkgsums` at release time
+
+package() {
+	cd "$srcdir/$_reponame-$pkgver"
+
+	# steamos-manager reads only /usr/share -- it has no /etc override path, so
+	# this file is lost if the steamos-manager package ever ships its own X2Mini
+	# config. Reinstall this package if TDP or the performance profiles stop
+	# working after a steamos-manager update.
+	install -Dm644 usr/share/steamos-manager/devices/onexplayer-x2-mini.toml \
+		"$pkgdir/usr/share/steamos-manager/devices/onexplayer-x2-mini.toml"
+
+	# InputPlumber reads /etc/inputplumber/*.d as overrides on top of
+	# /usr/share/inputplumber, so these survive InputPlumber updates.
+	install -Dm644 etc/inputplumber/devices.d/50-onexplayer_x2_mini.yaml \
+		"$pkgdir/etc/inputplumber/devices.d/50-onexplayer_x2_mini.yaml"
+	install -Dm644 etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml \
+		"$pkgdir/etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml"
+
+	# Sets USE_INPUTPLUMBER=1 so udev autostarts the service; it ships disabled
+	# and is activated on device match, which is why nothing worked originally.
+	install -Dm644 etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb \
+		"$pkgdir/etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb"
+
+	# gamescope scans /etc/gamescope/scripts after its bundled directory, so
+	# this survives gamescope updates. Without an entry here gamescope refuses
+	# to advertise HDR regardless of --hdr-enabled.
+	install -Dm644 hdr/scripts/onexplayer.x2mini.oled.lua \
+		"$pkgdir/etc/gamescope/scripts/onexplayer.x2mini.oled.lua"
+
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	for d in README.md docs/*.md; do
+		install -Dm644 "$d" "$pkgdir/usr/share/doc/$pkgname/$(basename "$d")"
+	done
+}

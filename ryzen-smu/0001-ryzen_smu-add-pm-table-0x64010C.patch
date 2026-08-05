@@ -1,0 +1,42 @@
+From: Jeff Hagadorn <jeff@aletheia.io>
+Subject: [PATCH] smu: add Strix Halo PM table version 0x64010C
+
+The ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388, SMU v10.100.6.0) reports PM
+table version 0x64010C, which is absent from the Strix Halo size table.
+Probing fails with:
+
+    ryzen_smu: Unknown PM table version: 0x0064010C
+    ryzen_smu: Failed to probe the PM table -- disabling feature (249)
+
+leaving pm_table, pm_table_size and pm_table_version unexposed, so ryzenadj
+cannot initialise at all ("Unable to get os_access Obj, check permission").
+
+The version differs from the already-supported 0x64020C only in the middle
+byte, and the same 0xE50 size applies. Verified on hardware: after writing
+distinct limits via MP1 messages 0x14 / 0x15 / 0x16 (stapm 31 W, fast 53 W,
+slow 47 W), the table reads back
+
+    offset 0x0  = 31.000002   (STAPM limit)
+    offset 0x8  = 53.000004   (PPT limit fast)
+    offset 0x10 = 47.000004   (PPT limit slow)
+
+matching the documented layout, and `ryzenadj -i` reports the same values.
+
+Signed-off-by: Jeff Hagadorn <jeff@aletheia.io>
+---
+--- a/smu.c
++++ b/smu.c
+@@ -1153,6 +1153,13 @@
+     break;
+   case CODENAME_STRIXHALO:
+     switch (version) {
++    case 0x64010C: // ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388), SMU v10.100.6.0
++      // Size is not published by AMD; borrowed from the sibling 0x64020C table,
++      // which differs only in the middle byte. Validated empirically: the
++      // stapm/fast/slow floats at offsets 0x0/0x8/0x10 read back the values
++      // written via MP1 messages 0x14/0x15/0x16.
++      g_smu.pm_dram_map_size = 0xE50;
++      break;
+     case 0x64020C:
+       g_smu.pm_dram_map_size = 0xE50;
+       break;

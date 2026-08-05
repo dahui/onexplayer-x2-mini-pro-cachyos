@@ -1,0 +1,14 @@
+# Built binary — produced by CI for releases, never committed
+/tdpd/oxp-tdpd
+
+# install.sh backs up anything it replaces as <file>.bak-<timestamp>
+*.bak-*
+
+# Release staging
+/dist/
+
+# makepkg output
+/packaging/*/pkg/
+/packaging/*/src/
+/packaging/*/*.pkg.tar.*
+/packaging/*/*.tar.gz

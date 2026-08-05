@@ -1,0 +1,81 @@
+# Maintainer: Jeff Hagadorn <jeff@aletheia.io>
+#
+# ryzen_smu with PM table version 0x64010C added, for the ONEXPLAYER X2Mini PRO.
+#
+# WHY THIS PACKAGE EXISTS
+#
+# The X2Mini PRO's firmware reports PM table version 0x64010C, which the
+# amkillam fork does not know. Probing fails, pm_table is never exposed, and the
+# consequences are worse than losing read-back: with ryzen_smu *loaded but
+# unpatched*, ryzenadj fails at init with "Unable to get os_access Obj, check
+# permission" -- a message that reads like a permissions problem and is not.
+# Every ryzenadj-based tool on the machine breaks.
+#
+# The patch itself is trivial (one case, same 0xE50 size as the neighbouring
+# 0x64020C). It was previously applied directly to ryzen_smu-dkms-git's
+# /usr/src tree, but any package update replaced that tree and silently dropped
+# it. Packaging is what makes the fix survive updates -- `conflicts` below is
+# the entire point of this package.
+#
+# THIS PACKAGE IS TEMPORARY. It should be deleted once the patch is upstreamed
+# to github.com/amkillam/ryzen_smu. Do not let it outlive that.
+#
+# Package name differs from upstream, but the module is still ryzen_smu.ko --
+# required, since that name is what modprobe, ryzenadj and oxp-tdpd look for.
+
+_reponame=onexplayer-x2-mini
+_upstream=amkillam/ryzen_smu
+_commit=1be4fb1                     # matches ryzen_smu-dkms-git 189.1be4fb1
+pkgname=ryzen-smu-x2mini-dkms
+pkgver=0.1.0
+pkgrel=1
+_modver=189.1be4fb1
+pkgdesc="ryzen_smu with ONEXPLAYER X2Mini PRO PM table 0x64010C - DKMS (temporary, pending upstream)"
+arch=('any')
+url="https://github.com/dahui/$_reponame"
+license=('GPL-2.0-only')
+depends=('dkms')
+makedepends=('git')
+# The reason this package exists: stop ryzen_smu-dkms-git updates from silently
+# reverting the patch.
+conflicts=('ryzen_smu-dkms-git' 'ryzen_smu-dkms')
+provides=("ryzen_smu-dkms=$_modver")
+source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        "ryzen_smu::git+https://github.com/$_upstream.git#commit=$_commit")
+sha256sums=('SKIP'
+            'SKIP')
+
+prepare() {
+	cd "$srcdir/ryzen_smu"
+	patch -p1 -i "$srcdir/$_reponame-$pkgver/ryzen-smu/0001-ryzen_smu-add-pm-table-0x64010C.patch"
+
+	# Fail loudly rather than shipping an unpatched module that would break
+	# ryzenadj in a way nobody would connect back to this package.
+	grep -q '0x64010C' smu.c || {
+		echo "patch applied but 0x64010C is absent from smu.c" >&2
+		exit 1
+	}
+}
+
+package() {
+	local dest="$pkgdir/usr/src/ryzen_smu-$_modver"
+	cd "$srcdir/ryzen_smu"
+
+	install -dm755 "$dest"
+	cp -r --no-preserve=ownership ./*.c ./*.h Makefile "$dest/" 2>/dev/null || true
+
+	install -Dm644 /dev/stdin "$dest/dkms.conf" <<-EOF
+		PACKAGE_NAME="ryzen_smu"
+		PACKAGE_VERSION="$_modver"
+		BUILT_MODULE_NAME[0]="ryzen_smu"
+		DEST_MODULE_LOCATION[0]="/updates"
+		MAKE[0]="make -C \${kernel_source_dir} M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build modules"
+		CLEAN="make -C \${kernel_source_dir} M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build clean"
+		AUTOINSTALL="yes"
+	EOF
+
+	install -Dm644 "$srcdir/$_reponame-$pkgver/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 "$srcdir/$_reponame-$pkgver/docs/ryzen-smu.md" \
+		"$pkgdir/usr/share/doc/$pkgname/ryzen-smu.md"
+}

@@ -1,0 +1,15 @@
+[[device]]
+dmi.sys_vendor = "ONE-NETBOOK"
+dmi.product_name = "ONEXPLAYER X2Mini PRO"
+device = "onexplayer_x2_mini_pro"
+variant = "X2Mini PRO"
+friendly_name = "ONEXPLAYER X2 Mini Pro"
+
+[gpu_performance]
+driver = "amdgpu"
+
+[gpu_power_profile]
+driver = "amdgpu"
+
+[inputplumber]
+target_devices = ["deck-uhid", "keyboard", "mouse"]

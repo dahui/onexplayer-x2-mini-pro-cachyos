@@ -1,0 +1,38 @@
+[Unit]
+Description=OneXPlayer TDP daemon (steamos-manager TdpLimit1 remote)
+Documentation=https://github.com/dahui/onexplayer-x2-mini/blob/main/docs/tdpd.md
+After=dbus.service
+Requires=dbus.service
+# The SMU mailbox lives in the ryzen_smu module's sysfs; without it the daemon
+# exits immediately with a clear error rather than serving a dead interface.
+ConditionPathExists=/sys/kernel/ryzen_smu_drv/mp1_smu_cmd
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/oxp-tdpd
+Restart=on-failure
+RestartSec=2
+
+# Holds the firmware's captured fast/slow limits. These are only readable
+# before anything overwrites them, so the first capture is persisted rather
+# than repeated on every restart. ProtectSystem=strict makes /var read-only,
+# so this directive is what makes the path writable.
+StateDirectory=oxp-tdpd
+
+# Needs root for the ryzen_smu sysfs writes, but nothing else.
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

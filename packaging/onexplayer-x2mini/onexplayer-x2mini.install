@@ -1,0 +1,74 @@
+_refresh() {
+	# systemd-hwdb update alone is not enough: udevd caches the compiled hwdb
+	# and keeps applying the old data until told to reload.
+	systemd-hwdb update 2>/dev/null || true
+	udevadm control --reload 2>/dev/null || true
+	udevadm trigger --subsystem-match=input --action=add 2>/dev/null || true
+}
+
+_kernel_params_notice() {
+	if ! grep -q 'amd_iommu=off' /proc/cmdline 2>/dev/null; then
+		cat <<-'EOF'
+
+		== Suspend needs a kernel parameter, and it is a real tradeoff ==
+
+		Without amd_iommu=off this machine HANGS entering s0ix and needs a
+		forced power-off. There is no S3 fallback on this platform.
+
+		    amd_iommu=off mem_sleep_default=s2idle
+
+		What it costs: the NPU stops working entirely (amdxdna requires
+		IOMMU) and DMA remapping is gone, which matters if you use
+		Thunderbolt. If you need the NPU, do not set this and do not
+		suspend.
+
+		This package will not edit your bootloader. Add the parameters
+		yourself, then regenerate:
+
+		    Limine        /etc/default/limine  -> sudo limine-update
+		    GRUB          /etc/default/grub    -> sudo grub-mkconfig -o /boot/grub/grub.cfg
+		    systemd-boot  /boot/loader/entries/*.conf
+
+		Details: /usr/share/doc/onexplayer-x2mini/suspend.md
+
+		EOF
+	fi
+}
+
+post_install() {
+	_refresh
+	cat <<-'EOF'
+
+	ONEXPLAYER X2Mini PRO configuration installed.
+
+	    sudo systemctl enable --now oxp-tdpd
+	    sudo systemctl restart steamos-manager
+
+	Verify:
+	    steamosctl get-device-model      # onexplayer_x2_mini_pro
+	    steamosctl get-tdp-limit
+
+	EOF
+	_kernel_params_notice
+}
+
+post_upgrade() {
+	_refresh
+	_kernel_params_notice
+}
+
+post_remove() {
+	# Leaving the hwdb entry compiled in would keep udev autostarting
+	# InputPlumber for a device that no longer has a profile.
+	_refresh
+	cat <<-'EOF'
+
+	Configuration removed.
+
+	InputPlumber may leave its source devices at mode 000 when it stops --
+	including js0, which makes the gamepad unusable. If that happens:
+
+	    sudo udevadm trigger --subsystem-match=input --action=add
+
+	EOF
+}
