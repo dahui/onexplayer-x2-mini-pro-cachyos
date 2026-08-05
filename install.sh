@@ -9,7 +9,7 @@
 #   ryzen_smu   PM table 0x64010C, without which ryzenadj breaks outright
 #   oxp-tdpd    gives Steam's TDP slider a backend (10-85 W)
 #   input       InputPlumber profile + capability map + steamos-manager config
-#   HDR         gamescope display script + --hdr-enabled
+#   HDR         one gamescope display script -- no session patching needed
 #
 # Deliberately does NOT touch the kernel command line. Suspend needs
 # amd_iommu=off, which costs the NPU, so that stays a conscious choice -- this
@@ -86,8 +86,8 @@ install_deps() {
 		warn "cannot determine the kernel headers package; DKMS builds may fail"
 	fi
 
-	# Only needed for install-hdr.sh's EDID sanity check, which degrades
-	# gracefully without it.
+	# Only used for manually inspecting the panel's EDID; nothing here requires
+	# it. Kept because it is what you reach for when HDR misbehaves.
 	[[ "$SKIP_HDR" == "1" ]] || want+=(edid-decode)
 
 	note "installing: ${want[*]}"
@@ -210,13 +210,18 @@ elif [[ "$SKIP_INPUT" == "1" && "$DRY_RUN" == "0" ]]; then
 fi
 
 # --- HDR --------------------------------------------------------------------
+# One file. gamescope only advertises HDR for panels present in its
+# known_displays table, and that table is the whole mechanism -- no --hdr-enabled
+# flag and no patched session script, both of which earlier versions of this
+# repo carried unnecessarily. Verified with the stock session on this unit.
+#
+# /etc/gamescope/scripts is scanned after gamescope's bundled directory, so this
+# survives gamescope updates.
 if [[ "$SKIP_HDR" == "0" ]]; then
 	say "HDR"
-	if [[ "$DRY_RUN" == "1" ]]; then
-		note "[dry-run] would run hdr/install-hdr.sh"
-	else
-		"$SRC/hdr/install-hdr.sh"
-	fi
+	install_file "$SRC/etc/gamescope/scripts/onexplayer.x2mini.oled.lua" \
+	             /etc/gamescope/scripts/onexplayer.x2mini.oled.lua
+	note "takes effect on the next game-mode session"
 else
 	say "Skipping HDR (--skip-hdr)"
 fi
@@ -298,4 +303,4 @@ if [[ "$SKIP_INPUT" == "0" ]]; then
 fi
 
 say "Done"
-note "Reboot is not required, but log out and back in for HDR to take effect."
+note "Reboot is not required. HDR takes effect on the next game-mode session."

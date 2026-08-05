@@ -13,7 +13,7 @@ measured, the docs say so.
 |---|---|---|
 | **TDP** | slider does nothing | 10–85 W through Steam's slider |
 | **Suspend** | hard hang, forced power-off | s2idle works ([one kernel parameter](#suspend-needs-a-kernel-parameter-and-it-costs-the-npu)) |
-| **HDR** | not offered | enabled, confirmed in-game |
+| **HDR** | not offered | enabled, confirmed in-game (one Lua file) |
 | **Fans / charge limit** | no sensors, no limit | RPM, PWM, charge threshold |
 | **Brightness** | slider does nothing | works |
 | **Extra buttons** | dead | OneXPlayer → QAM, Keyboard/Home → Steam+X |

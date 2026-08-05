@@ -58,7 +58,7 @@ package() {
 	# gamescope scans /etc/gamescope/scripts after its bundled directory, so
 	# this survives gamescope updates. Without an entry here gamescope refuses
 	# to advertise HDR regardless of --hdr-enabled.
-	install -Dm644 hdr/scripts/onexplayer.x2mini.oled.lua \
+	install -Dm644 etc/gamescope/scripts/onexplayer.x2mini.oled.lua \
 		"$pkgdir/etc/gamescope/scripts/onexplayer.x2mini.oled.lua"
 
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

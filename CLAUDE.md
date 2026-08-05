@@ -354,19 +354,26 @@ The panel advertises HDR correctly (BT2020RGB, SMPTE ST2084, 1107 cd/m² peak,
 connector exposes `HDR_OUTPUT_METADATA`, `Colorspace` and `max bpc` (range 8–16,
 so no bit-depth clamp).
 
-**Two things are needed, and the second is the one that matters:**
-
-1. gamescope must be launched with `--hdr-enabled`. There is no environment
-   variable equivalent — every `GAMESCOPE_*_HDR_*` variable is an output/feedback
-   atom, not an input.
-2. **gamescope only advertises HDR for panels it recognises.** It keeps
-   `gamescope.config.known_displays`, populated by Lua scripts in
-   `/usr/share/gamescope/scripts/00-gamescope/displays/`, matched by EDID. A
-   panel with no entry gets no HDR regardless of the command line. Custom
-   entries go in `/etc/gamescope/scripts/`, which is scanned afterwards and
-   survives package updates.
+**Exactly one thing is needed: a display-script entry.** gamescope only
+advertises HDR for panels it recognises. It keeps
+`gamescope.config.known_displays`, populated by Lua scripts in
+`/usr/share/gamescope/scripts/00-gamescope/displays/`, matched by EDID. A panel
+with no entry gets no HDR. Custom entries go in `/etc/gamescope/scripts/`, which
+is scanned afterwards and survives package updates.
 
 Our entry matches on EDID vendor `SDC` and product `0x4301`.
+
+**`--hdr-enabled` is NOT required**, despite most guides implying otherwise, and
+an earlier version of this document wrongly called it necessary. Verified with
+the stock session script and no flag: all three atoms read 1 and HDR engaged in
+a real title. The flag only pre-sets `cv_hdr_enabled` (default false,
+`steamcompmgr.cpp:460`) at startup; Steam sets the same convar at runtime via
+the `GAMESCOPE_DISPLAY_HDR_ENABLED` atom (`:5892`). That is why the Steam Deck
+OLED works with an unmodified session script — the same script that ships here.
+
+**`hdr.force_enabled` is a no-op.** `DRMBackend.cpp:2334` reads only
+`supported`, `eotf`, and the three luminance values; the string is not in the
+binary. Several bundled entries set it anyway. Do not copy it.
 
 Confirmed working on Like a Dragon: Infinite Wealth:
 

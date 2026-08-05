@@ -16,10 +16,60 @@ The first two atoms are what Steam reads to decide whether to offer HDR;
 `GAMESCOPE_HDR_OUTPUT_FEEDBACK` is the one that confirms HDR output actually
 engaged rather than merely being advertised.
 
-**It took two fixes, and the second was the one that mattered.** Passing
-`--hdr-enabled` is necessary but not sufficient: gamescope only advertises HDR
-for panels it *recognises*, and this one was not in its table. With the flag
-alone, both atoms stayed unset and Steam showed nothing.
+**One file is all it takes: the gamescope display script.** gamescope only
+advertises HDR for panels it *recognises*, and this one was not in its table.
+
+An earlier version of this repo also patched the gamescope session to pass
+`--hdr-enabled`, and this document claimed the flag was "necessary but not
+sufficient". **That was wrong, and it was never tested.** The sequence had been
+flag-alone (no HDR), then flag-plus-script (HDR) — the script-without-flag case
+was simply never tried, and the conclusion was written as though it had been.
+
+Retested with the stock, unpatched session script and only the display script
+installed. HDR engaged on Like a Dragon: Infinite Wealth, with no
+`--hdr-enabled` anywhere in the running gamescope command line:
+
+```
+$ pgrep -af gamescope
+gamescope --generate-drm-mode fixed --xwayland-count 2 ... -O *,eDP-1
+                                       (no --hdr-enabled)
+$ DISPLAY=:0 xprop -root GAMESCOPE_DISPLAY_SUPPORTS_HDR \
+      GAMESCOPE_DISPLAY_HDR_ENABLED GAMESCOPE_HDR_OUTPUT_FEEDBACK
+GAMESCOPE_DISPLAY_SUPPORTS_HDR(CARDINAL) = 1
+GAMESCOPE_DISPLAY_HDR_ENABLED(CARDINAL) = 1
+GAMESCOPE_HDR_OUTPUT_FEEDBACK(CARDINAL) = 1
+```
+
+### Why the flag is redundant
+
+`--hdr-enabled` sets one convar, which defaults off:
+
+```cpp
+// steamcompmgr.cpp:460
+gamescope::ConVar<bool> cv_hdr_enabled{ "hdr_enabled", false, ... };
+// :7869   --hdr-enabled  ->  cv_hdr_enabled = true
+// :5892   cv_hdr_enabled = !!get_prop( ..., gamescopeDisplayHDREnabled, 0 );
+```
+
+That last line is the point: **Steam sets the same convar at runtime** through
+the `GAMESCOPE_DISPLAY_HDR_ENABLED` atom. The flag only pre-sets it at startup.
+This is also why the Steam Deck OLED has working HDR with a completely
+unmodified session script — the same script that ships here.
+
+The session script is a poor place to patch anyway: it has no argument
+passthrough and no environment equivalent for gamescope flags (its last line is
+a bare `-O "${OUTPUT_CONNECTOR:-*,eDP-1}" \`), so the old approach had to derive
+a patched copy and re-derive it after every `gamescope-session-cachyos` update.
+All of that is gone.
+
+### `force_enabled` does nothing
+
+Several bundled OLED entries set `hdr.force_enabled = true`, and this repo
+copied it. gamescope 3.16 never reads it — `DRMBackend.cpp:2334` reads exactly
+`supported`, `eotf`, `max_content_light_level`, `max_frame_average_luminance`
+and `min_content_light_level`, and the string `force_enabled` does not appear in
+the binary at all. It has been removed rather than left implying behaviour it
+does not have.
 
 Everything below gamescope is ready. The panel is a Samsung `AMS881KB01-0`
 OLED, and its EDID advertises HDR properly:
@@ -44,28 +94,17 @@ $ sudo modetest -M amdgpu -c   # eDP-1 props
   124 max bpc:
 ```
 
-**The gap is that gamescope is never told to use them.** The stock session
-script builds its command line without `--hdr-enabled`:
+The stock session script builds its gamescope command line without
+`--hdr-enabled`, and that turns out not to matter — Steam sets the convar itself
+at runtime, as described above.
 
-```bash
-exec gamescope \
-	--generate-drm-mode "${DRM_MODE:-fixed}" \
-	--xwayland-count "${XWAYLAND_COUNT:-2}" \
-	...
-	-O "${OUTPUT_CONNECTOR:-*,eDP-1}" \
-```
-
-Without that flag gamescope tonemaps HDR clients to SDR, and Steam shows no HDR
-option. There is no environment variable that turns it on — the full set of
-`GAMESCOPE_*_HDR_*` variables are output/feedback atoms, not inputs — so it has
-to be a command-line argument.
-
-The session script does set `STEAM_GAMESCOPE_HDR_SUPPORTED=1` globally, but
+It does set `STEAM_GAMESCOPE_HDR_SUPPORTED=1` globally, while
 `STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=1` and
 `STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=1` are gated on
-`board_name = "Galileo"` (Steam Deck OLED), so they never apply here.
+`board_name = "Galileo"` (Steam Deck OLED), so they never apply here. Those
+control whether Steam *defaults* HDR on, not whether it is available.
 
-### Fix 2 — the display script (the one that actually mattered)
+### The display script — the whole fix
 
 gamescope keeps a `gamescope.config.known_displays` table, populated by Lua
 scripts in `/usr/share/gamescope/scripts/00-gamescope/displays/`. Each entry
@@ -111,46 +150,25 @@ $ sudo modetest -M amdgpu -c | grep -A4 HDR_OUTPUT_METADATA
 		value:            <- empty
 ```
 
-`--hdr-enabled` *permits* HDR; gamescope only switches the output to HDR10 PQ
-when HDR content is actually on screen. An empty blob with nothing HDR running
-is expected, not a fault. The real test is launching an HDR-capable game and
-re-checking.
-
-### Fix 1 — the `--hdr-enabled` flag, plus Steam's HDR defaults
-
-`./hdr/install-hdr.sh` derives a patched copy of the session script with
-`--hdr-enabled` inserted as the first gamescope argument, installs it to
-`/usr/local/lib/steamos/gamescope-session-hdr`, and points a systemd drop-in at
-it:
-
-```ini
-# /etc/systemd/user/gamescope-session.service.d/10-x2mini-hdr.conf
-[Service]
-ExecStart=
-ExecStart=/usr/local/lib/steamos/gamescope-session-hdr
-```
-
-Deriving rather than vendoring means the copy tracks whatever the packaged
-script does, apart from the one inserted line. The installer verifies the patch
-applied, syntax-checks the result, and refuses to install a broken script. If a
-future gamescope-session release adds `--hdr-enabled` itself, re-running the
-installer detects that and removes the override instead.
+gamescope only switches the output to HDR10 PQ when HDR content is actually on
+screen. An empty blob with nothing HDR running is expected, not a fault. The real
+test is launching an HDR-capable game and re-checking
+`GAMESCOPE_HDR_OUTPUT_FEEDBACK`.
 
 ### Applying it
 
 ```bash
-./hdr/install-hdr.sh
-systemctl --user restart gamescope-session.target
+./install.sh                       # or just the one file:
+sudo install -Dm644 etc/gamescope/scripts/onexplayer.x2mini.oled.lua \
+    /etc/gamescope/scripts/onexplayer.x2mini.oled.lua
 ```
 
-The service itself sets `RefuseManualStart=yes`, so restart the **target**, not
-the service. The HDR toggle lives in Settings → Display.
+Takes effect on the next game-mode session. Nothing needs restarting from the
+desktop, and there is no session script to keep in sync.
 
-### Re-run after updates
-
-A `gamescope-session-cachyos` update replaces the stock session script but not
-our copy, so re-run `./hdr/install-hdr.sh` to pick up upstream changes. The display
-script in `/etc/` is unaffected by package updates.
+`/etc/gamescope/scripts` is scanned after gamescope's bundled directory, so this
+survives gamescope updates — including `gamescope-session-cachyos` updates, which
+used to require re-running an installer.
 
 ### Verifying
 

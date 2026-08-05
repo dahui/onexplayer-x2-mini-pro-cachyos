@@ -1,9 +1,24 @@
 -- ONEXPLAYER X2Mini PRO internal OLED — Samsung AMS881KB01-0.
 --
--- gamescope only advertises HDR for panels it recognises: `--hdr-enabled` alone
--- is not enough, the display must also match an entry in
--- gamescope.config.known_displays. Without one, Steam shows no HDR toggle even
--- though the panel and the kernel are both ready.
+-- This file is the ONLY thing needed for HDR on this device. gamescope
+-- advertises HDR only for panels it recognises, so without an entry here the
+-- panel and kernel being ready counts for nothing.
+--
+-- No `--hdr-enabled` flag is required, despite what most guides imply.
+-- Verified on this unit: with the stock, unpatched session script and this file
+-- in place, launching an HDR title gives
+--   GAMESCOPE_DISPLAY_SUPPORTS_HDR = 1
+--   GAMESCOPE_DISPLAY_HDR_ENABLED  = 1
+--   GAMESCOPE_HDR_OUTPUT_FEEDBACK  = 1   <- output genuinely engaged
+-- The flag only pre-sets gamescope's `cv_hdr_enabled` convar at startup; Steam
+-- sets the same convar at runtime through the GAMESCOPE_DISPLAY_HDR_ENABLED
+-- atom (steamcompmgr.cpp:5892), which is why the Steam Deck OLED works with an
+-- unmodified session script too.
+--
+-- Note there is deliberately no `force_enabled` here. Other entries carry it,
+-- but gamescope 3.16 never reads it -- DRMBackend.cpp:2334 reads exactly
+-- `supported`, `eotf`, and the three luminance values, and the string does not
+-- appear in the binary at all.
 --
 -- This is the same panel used in the Lenovo Legion Go 2, which gamescope 3.16
 -- does not ship an entry for either — the bundled lenovo.legiongo*.lua scripts
@@ -35,7 +50,6 @@ gamescope.config.known_displays.oxp_x2mini_oled = {
 	pretty_name = "AMS881KB01-0 OLED",
 	hdr = {
 		supported = true,
-		force_enabled = true,
 		-- Describes the panel's native SDR transfer function, not the HDR
 		-- output encoding — matching every other OLED entry shipped with
 		-- gamescope (Steam Deck OLED, Zotac AMOLED, OneXPlayer F1 OLED).
