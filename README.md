@@ -35,12 +35,11 @@ Home mapping** (InputPlumber bug). See [what's still broken](#whats-still-broken
 curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install.sh | bash
 ```
 
-No clone needed — everything it installs is an AUR package or a checksum-verified
-package from the [releases page](../../releases), so there is nothing in this
-repository the script requires. Everything ships as a pacman package, so the script
-installs those and gets out of the way — it never copies configuration into
-place itself, which is what keeps a package install and a script install from
-drifting apart.
+No clone needed. Everything it installs is a pacman package — an AUR one, or a
+checksum-verified package from the [releases page](../../releases) — so the
+script installs those and gets out of the way. It never copies configuration
+into place itself, which is what keeps the script and a plain `paru` install
+from drifting apart.
 
 | | |
 |---|---|
@@ -61,27 +60,47 @@ curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyo
 Flags: `--dry-run`, `--skip-ryzen-smu`, `--force`. `OXP_TAG=v0.1.0` pins a
 release instead of taking the latest.
 
-Prefer to skip the script entirely? `paru -S onexplayer-x2mini` gets you
-everything except the ryzen_smu fork, which lives on the
-[releases page](../../releases). The script exists to do both, start the
-services, and tell you about the kernel parameter below.
+### Installing by hand instead
 
-<details>
-<summary>Or with pacman-managed packages</summary>
+The script is only a convenience. Everything it installs is a package:
 
 ```bash
-cd packaging/onexplayer-x2mini && makepkg -si
+paru -S onexplayer-x2mini        # configs, TDP daemon, oxpec, and their deps
 ```
 
-Four packages live in [`packaging/`](packaging/README.md): the configs, the TDP
-daemon, and the two DKMS modules. `install.sh` already builds and installs the
-two kernel modules this way, so they are pacman-managed either way.
+That is everything except `ryzen-smu-x2mini-dkms`, which is published on the
+[releases page](../../releases) rather than the AUR — it forks an existing AUR
+package and is meant to disappear once its patch is upstreamed. Download it from
+there and:
 
-`ryzen-smu-x2mini-dkms` deliberately conflicts with `ryzen_smu-dkms-git` — that
-is what stops a package update silently reverting the PM table patch and
-breaking ryzenadj. It is distributed only on the GitHub release page, never the
-AUR: it forks someone else's package and is meant to disappear once the patch is
-upstreamed. [`packaging/README.md`](packaging/README.md) covers the rest.
+```bash
+sudo pacman -U ./ryzen-smu-x2mini-dkms-*.pkg.tar.zst
+sudo systemctl enable --now oxp-tdpd
+sudo systemctl restart steamos-manager
+```
+
+Without it you still get TDP *control*; only read-back falls back to a cached
+value. It deliberately conflicts with `ryzen_smu-dkms-git` — that conflict is
+the entire point of the package, since it is what stops a routine package update
+silently reverting the PM table patch and breaking ryzenadj.
+
+Compared with the script you lose the hardware check, the kernel-headers
+resolution, checksum verification of that download, and the kernel-parameter
+notice below.
+
+<details>
+<summary>Building from a clone (development)</summary>
+
+To install your working tree rather than the published release:
+
+```bash
+cd packaging/<package> && makepkg -si
+```
+
+Four PKGBUILDs live in [`packaging/`](packaging/README.md). Note the two that
+source release artifacts (`oxp-tdpd-bin`, `onexplayer-x2mini`) still pull those
+from the last published release, not from your checkout; the two DKMS packages
+are self-contained and build entirely from local sources.
 </details>
 
 ## Suspend needs a kernel parameter, and it costs the NPU
