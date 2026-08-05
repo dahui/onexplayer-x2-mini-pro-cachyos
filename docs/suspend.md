@@ -99,8 +99,8 @@ sudo ./suspend/suspend-test.sh ladder     # then `none` for the real thing
 
 If the ladder reaches `none` and survives, the IOMMU can stay on and the NPU
 comes back. If it hangs, put the parameter back — you will have lost nothing but
-a reboot. Note 7.2 is also what the **back paddles** are waiting on
-(`hid-oxp`), so it is worth testing both at once.
+a reboot. Note 7.2 is also what the **back paddles** and **RGB lighting** are
+waiting on (`hid-oxp`), so it is worth testing all of it at once.
 
 ## Two things that did NOT need fixing
 

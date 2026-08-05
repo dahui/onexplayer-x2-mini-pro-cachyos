@@ -19,8 +19,10 @@ measured, the docs say so.
 | **Extra buttons** | dead | OneXPlayer → QAM, Keyboard/Home → Steam+X |
 | **Performance profiles** | absent | low-power / balanced / performance |
 
-Not fixed yet: the **back paddles** (need Linux 7.2's `hid-oxp`) and a **custom
-Home mapping** (InputPlumber bug). See [what's still broken](#whats-still-broken).
+Not fixed yet: the **back paddles** and **RGB lighting** — both wait on Linux
+7.2's `hid-oxp` driver and are not available on any kernel CachyOS ships today —
+plus a **custom Home mapping** (InputPlumber bug). See
+[what's still broken](#whats-still-broken).
 
 ## Requirements
 
@@ -173,9 +175,27 @@ Fully reversible. On this install (Limine), add the parameters to the
 
 | | Why | Fix |
 |---|---|---|
-| **Back paddles** | Emit nothing until the controller enters "full intercept" mode, which silences the entire X-Box gamepad — there is no mode giving both. | Linux 7.2's `hid-oxp`, a Valve-authored driver. **Not yet in CachyOS**; running a beta kernel is deliberately not a prerequisite here. |
+| **Back paddles** | Emit nothing until the controller enters "full intercept" mode, which silences the entire X-Box gamepad — there is no mode giving both. | Linux 7.2's `hid-oxp`. **Not yet in CachyOS** — see below. |
+| **RGB lighting** | No control at all. Nothing in this repo touches it, and there is no LED device to write to. | Also Linux 7.2's `hid-oxp` — see below. |
 | **Custom Home mapping** | An InputPlumber 0.78 bug: any rule sourcing Home's capability corrupts the *next* button pressed. | Needs an upstream fix. Home's default Steam+X behaviour works regardless, so this is a nice-to-have. |
 | **`amd_iommu=off`** | See above. | Worth re-testing on 7.2 — if s0ix entry is fixed, the NPU comes back. |
+
+### Paddles and RGB are waiting on Linux 7.2
+
+Both need `hid-oxp`, a Valve-authored HID driver. It is **already in mainline**,
+and its device table matches this controller (`1a86:fe00`) — so no patch from us
+is needed. It simply has not reached CachyOS yet, and running a beta or mainline
+kernel is deliberately not a prerequisite for anything here.
+
+**Until 7.2 arrives, neither works. Nothing you install from this repo changes
+that**, so please do not go looking for a setting.
+
+When it does land, expect the paddles to start working. RGB is **less certain**:
+`hid-oxp` keeps a list of devices whose lighting it deliberately skips, and the
+ONEXPLAYER APEX — which shares this machine's system board — is on it, while the
+X2Mini PRO is not on the list either way. Whether that turns out to be right is
+untested. If RGB does not appear on 7.2, that is a known possibility rather than
+a broken install; the detail is in [CLAUDE.md](CLAUDE.md) §7.
 
 ## Verifying
 
