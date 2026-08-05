@@ -25,6 +25,11 @@
 # upstreamed, so it is published on the releases page instead -- see
 # packaging/README.md. It is downloaded and checksum-verified below.
 #
+# If the AUR is unavailable, install-from-release.sh installs the same packages
+# from the release page with plain pacman and no AUR helper. Keep the two in
+# step: everything outside the "where do packages come from" middle section is
+# meant to be identical, so the machine ends up the same either way.
+#
 # The kernel command line is left alone on purpose: suspend needs
 # amd_iommu=off, which costs the NPU, so that stays a conscious choice. This
 # script only tells you what to add.
@@ -179,8 +184,24 @@ install_ryzen_smu() {
     Build it yourself instead: packaging/ryzen-smu-x2mini-dkms"
 	fi
 
-	note "this replaces ryzen_smu-dkms-git if present -- that is intended,"
-	note "it is what stops a package update reverting the PM table patch"
+	# ryzen-smu-x2mini-dkms conflicts with ryzen_smu-dkms-git deliberately --
+	# that conflict is the whole point of the package, since an update of the
+	# upstream one silently reverts the PM table patch and breaks every
+	# ryzenadj-based tool.
+	#
+	# pacman asks before removing a conflicting package, and that prompt defaults
+	# to NO (callback.c uses noyes for ALPM_QUESTION_CONFLICT_PKG). Under
+	# --noconfirm the default is what it takes, so the install below would abort
+	# with "unresolvable package conflicts detected". Remove it up front instead,
+	# where it can be explained.
+	if pacman -Qq ryzen_smu-dkms-git >/dev/null 2>&1; then
+		note "removing ryzen_smu-dkms-git first -- ours carries the PM table"
+		note "patch this device needs, and the two cannot coexist"
+		$SUDO pacman -R --noconfirm ryzen_smu-dkms-git \
+			|| die "could not remove ryzen_smu-dkms-git. Something may depend on it:
+      pacman -Qi ryzen_smu-dkms-git"
+	fi
+
 	$SUDO pacman -U --noconfirm --needed "$tmp/$pkg" \
 		|| die "pacman failed to install $pkg"
 }
@@ -199,10 +220,11 @@ if [[ "$DRY_RUN" == "1" ]]; then
 	note "          (pulls steamos-manager, inputplumber, oxp-tdpd-bin, oxpec-x2mini-dkms)"
 else
 	paru -S --needed --noconfirm onexplayer-x2mini || die "package install failed.
-    If onexplayer-x2mini is not found it may not be published yet; you can build
-    everything from a clone instead:
-      git clone https://github.com/$REPO.git
-      cd packaging/onexplayer-x2mini && makepkg -si"
+
+    If the AUR is unreachable or the package is not found there, every package
+    is also attached to the release and installs with pacman alone:
+
+      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install-from-release.sh | bash"
 fi
 
 # --- services ---------------------------------------------------------------
@@ -280,12 +302,10 @@ else
 	warn "charge limit inert -- the patched oxpec driver did not load, see docs/oxpec.md"
 fi
 
-if [[ "$SKIP_INPUT" == "0" ]]; then
-	if grep -q "Generic Steam Controller" /sys/class/hidraw/*/device/uevent 2>/dev/null; then
-		note "virtual Steam Deck controller is up"
-	else
-		warn "no virtual controller yet -- check 'journalctl -u inputplumber -n 50'"
-	fi
+if grep -q "Generic Steam Controller" /sys/class/hidraw/*/device/uevent 2>/dev/null; then
+	note "virtual Steam Deck controller is up"
+else
+	warn "no virtual controller yet -- check 'journalctl -u inputplumber -n 50'"
 fi
 
 say "Done"

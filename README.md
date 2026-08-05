@@ -25,7 +25,9 @@ Home mapping** (InputPlumber bug). See [what's still broken](#whats-still-broken
 ## Requirements
 
 - ONEXPLAYER X2Mini PRO. The installer refuses other machines unless `--force`.
-- Arch or CachyOS with `paru`, and a kernel with headers available.
+- Arch or CachyOS, and a kernel with headers available.
+- `paru` for the AUR route. Not needed for the
+  [release route](#if-the-aur-is-down), which uses pacman alone.
 - Tested on `7.1.6-1-cachyos-deckify`, `steamos-manager 26.4.1`,
   `inputplumber 0.78.0`.
 
@@ -60,33 +62,71 @@ curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyo
 Flags: `--dry-run`, `--skip-ryzen-smu`, `--force`. `OXP_TAG=v0.1.0` pins a
 release instead of taking the latest.
 
+### If the AUR is down
+
+The AUR has extended outages — it was offline for a long stretch after a malware
+incident. Every package is therefore attached to each
+[release](../../releases) as well, and this installs from there with **plain
+pacman and no AUR helper**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install-from-release.sh | bash
+```
+
+Same packages, different transport. CI builds them from the same tagged
+PKGBUILDs the AUR serves — `oxp-tdpd-bin` and `onexplayer-x2mini` are built by
+fetching the very release artifacts an AUR build would fetch — so the machine
+ends up identical either way. Everything is checksum-verified against
+`SHA256SUMS`. It takes the same flags, plus `--keep` to leave the downloaded
+packages behind.
+
+The only dependencies not on the release page are `steamos-manager`,
+`inputplumber`, `dkms` and `dbus`, and all four are in the CachyOS repos.
+
 ### Installing by hand instead
 
-The script is only a convenience. Everything it installs is a package:
+The scripts are only a convenience. Everything they install is a package, and
+both channels carry the same ones — pick either.
+
+**From the AUR:**
 
 ```bash
 paru -S onexplayer-x2mini        # configs, TDP daemon, oxpec, and their deps
 ```
 
-That is everything except `ryzen-smu-x2mini-dkms`, which is published on the
+That covers everything except `ryzen-smu-x2mini-dkms`, which is published on the
 [releases page](../../releases) rather than the AUR — it forks an existing AUR
-package and is meant to disappear once its patch is upstreamed. Download it from
-there and:
+package and is meant to disappear once its patch is upstreamed. Download that one
+and `pacman -U` it alongside.
+
+**From the releases page**, needing no AUR helper. Download all four packages and
+`SHA256SUMS`, then hand pacman every file in a single transaction — that is what
+lets it resolve the dependencies between them and pull `steamos-manager` and
+`inputplumber` from the repos:
 
 ```bash
-sudo pacman -U ./ryzen-smu-x2mini-dkms-*.pkg.tar.zst
-sudo systemctl enable --now oxp-tdpd
-sudo systemctl restart steamos-manager
+sha256sum -c --ignore-missing SHA256SUMS    # verify before installing
+sudo pacman -U ./*.pkg.tar.zst
 ```
 
-Without it you still get TDP *control*; only read-back falls back to a cached
-value. It deliberately conflicts with `ryzen_smu-dkms-git` — that conflict is
-the entire point of the package, since it is what stops a routine package update
-silently reverting the PM table patch and breaking ryzenadj.
+Either route, finish by starting the daemon:
 
-Compared with the script you lose the hardware check, the kernel-headers
-resolution, checksum verification of that download, and the kernel-parameter
-notice below.
+```bash
+sudo systemctl enable --now oxp-tdpd
+sudo systemctl restart steamos-manager      # it binds remotes at startup
+```
+
+Two things worth knowing whichever way you go:
+
+- **`ryzen-smu-x2mini-dkms` conflicts with `ryzen_smu-dkms-git` by design.** That
+  conflict is the entire point of the package: it stops a routine update of the
+  latter silently reverting the PM table patch and breaking ryzenadj. If you have
+  `ryzen_smu-dkms-git` installed, remove it first — pacman's conflict prompt
+  defaults to *no*, so a `--noconfirm` transaction aborts rather than replacing
+  it. Skipping the fork entirely still leaves TDP *control* working; only
+  read-back falls back to a cached value.
+- Compared with the scripts you lose the hardware check, the kernel-headers
+  resolution, the checksum verification, and the kernel-parameter notice below.
 
 <details>
 <summary>Building from a clone (development)</summary>
@@ -163,20 +203,27 @@ Test in a text field or Steam's controller mapping tester.
 
 ## Uninstall
 
+Everything is a pacman package, so removal is one transaction:
+
 ```bash
 sudo systemctl disable --now oxp-tdpd
-sudo rm -f /usr/bin/oxp-tdpd /etc/systemd/system/oxp-tdpd.service \
-           /etc/steamos-manager/remotes.d/oxp-tdpd.toml \
-           /usr/share/dbus-1/system.d/io.aletheia.OxpTdp1.conf
-sudo rm -f /etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb \
-           /etc/inputplumber/devices.d/50-onexplayer_x2_mini.yaml \
-           /etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml \
-           /usr/share/steamos-manager/devices/onexplayer-x2-mini.toml \
-           /etc/gamescope/scripts/onexplayer.x2mini.oled.lua
-sudo dkms remove -m oxpec-x2mini -v 1.0 --all
+sudo pacman -R onexplayer-x2mini oxp-tdpd-bin oxpec-x2mini-dkms ryzen-smu-x2mini-dkms
 sudo systemd-hwdb update && sudo udevadm control --reload
 sudo systemctl restart steamos-manager
 ```
+
+Do not delete the files by hand — pacman owns them, and removing them behind its
+back leaves its database claiming they are still installed. Both DKMS modules are
+deregistered automatically by Arch's `71-dkms-remove` hook; no `dkms remove` is
+needed.
+
+`steamos-manager` and `inputplumber` are left in place, since they are ordinary
+packages you may want anyway. Add them to the command if you installed them only
+for this. `/etc/oxp-tdpd.conf` is in `backup=()`, so an edited copy is preserved
+as `.pacsave` rather than deleted.
+
+The kernel parameters, if you added them, are the one thing nothing here touches
+— remove them from your bootloader config yourself.
 
 If InputPlumber leaves the gamepad unusable after stopping — it `chmod 000`s its
 source devices and does not reliably restore them:

@@ -1,12 +1,19 @@
 # Packaging
 
-Four packages. `makepkg -si` in any of these directories installs it locally,
-and `install.sh` does exactly that for the two kernel modules.
+Four packages. `makepkg -si` in any of these directories installs it locally.
 
-Three of the four also go to the AUR via [`aur-publish.sh`](aur-publish.sh),
-driven by [`../.github/workflows/aur.yml`](../.github/workflows/aur.yml)
-automatically after a successful release. The fourth deliberately does not —
-see below.
+**Every one of them is attached to each GitHub release**, and three of the four
+also go to the AUR via [`aur-publish.sh`](aur-publish.sh), driven by
+[`../.github/workflows/aur.yml`](../.github/workflows/aur.yml) automatically
+after a successful release. The fourth deliberately does not — see below.
+
+Two channels rather than one is not redundancy for its own sake. The AUR has
+extended outages, and a package set where three of four come from a channel that
+is down is not installable at all. `install.sh` uses the AUR;
+[`install-from-release.sh`](../install-from-release.sh) uses the release page
+and needs no AUR helper. The packages are the same either way — CI builds
+`oxp-tdpd-bin` and `onexplayer-x2mini` by fetching the very release artifacts an
+AUR build fetches, so that build doubles as a smoke test of the AUR path.
 
 ## The package set
 
@@ -75,9 +82,16 @@ of someone else's package, sitting in a shared namespace, is precisely the thing
 that quietly becomes permanent — so it is distributed on the GitHub release page
 instead, where it can simply stop being built.
 
-Users lose nothing: `install.sh` builds and installs it from the checkout, and it
-is still a real pacman package, so the `conflicts` protection and clean removal
-both work exactly as they would from the AUR.
+Users lose nothing: both install scripts fetch it from the release page and
+checksum-verify it, and it is still a real pacman package, so the `conflicts`
+protection and clean removal work exactly as they would from the AUR.
+
+That `conflicts` line does need handling at install time, though. pacman asks
+before removing a conflicting package and **that prompt defaults to no**
+(`callback.c` uses `noyes` for `ALPM_QUESTION_CONFLICT_PKG`), so under
+`--noconfirm` a machine with `ryzen_smu-dkms-git` installed would abort the whole
+transaction with "unresolvable package conflicts detected". Both scripts remove
+it explicitly first, where the reason can be printed.
 
 `oxpec-x2mini-dkms` is a different case and is fine on the AUR — it forks
 nothing, being a DKMS build of an *in-kernel* driver with one DMI ID added, which
@@ -119,6 +133,25 @@ the first push of a valid `PKGBUILD` + `.SRCINFO`, which the script handles.
 
 **Automatic.** Pushing a `v*` tag runs `release.yml`, and `aur.yml` fires when
 that completes successfully, publishing all three packages.
+
+### `release.yml` publishes in two passes, and the order is load-bearing
+
+`oxp-tdpd-bin` and `onexplayer-x2mini` have release artifacts in their
+`source=()`, so those artifacts must already be downloadable before either can
+be built. A draft release does not expose assets at the public download path, so
+the release has to be genuinely published in between:
+
+1. Build the binary, the source tarball and the two self-contained DKMS
+   packages; publish them — **without `SHA256SUMS`**.
+2. Poll until the assets are actually downloadable, build the two
+   release-sourced packages against the live release, then publish those plus a
+   `SHA256SUMS` covering everything.
+
+`SHA256SUMS` is withheld until the end deliberately. A checksum file listing only
+some assets is worse than no file at all: both install scripts verify against it,
+and a missing line would have to be told apart from a real mismatch. If the job
+dies between the passes the release simply has no `SHA256SUMS`, and both scripts
+refuse to install rather than installing something unverified.
 
 ### Why the trigger is `workflow_run` and not `release: published`
 

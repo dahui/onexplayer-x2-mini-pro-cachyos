@@ -30,6 +30,13 @@ optdepends=(
 provides=('oxp-tdpd')
 conflicts=('oxp-tdpd')
 backup=('etc/oxp-tdpd.conf')
+# Ship the published binary byte-for-byte. makepkg strips binaries and splits
+# debug symbols by default, which for a -bin package is both pointless and
+# actively wrong: the binary is already built with -s -w, and re-stripping it
+# means the file installed is NOT the one the release checksummed -- which is
+# the only thing tying this package to that build. It also produced a spurious
+# 3.7KB oxp-tdpd-bin-debug package on v0.1.1.
+options=('!strip' '!debug')
 install="$pkgname.install"
 source=(
 	"$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"

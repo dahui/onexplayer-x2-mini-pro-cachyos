@@ -33,9 +33,17 @@ import (
 // when running the binary by hand.
 const fallbackStateDir = "/var/lib/oxp-tdpd"
 
+// version is stamped by the release build via -ldflags "-X main.version=<tag>".
+// It must stay a package-level var in main: -X silently does nothing if the
+// symbol does not exist, so a missing declaration is not a build error, just a
+// binary that cannot say what it is. Releases up to v0.1.1 passed that flag with
+// no such variable here and were stamped with nothing at all.
+var version = "dev"
+
 func main() {
 	var (
 		verbose   = flag.Bool("v", false, "verbose logging")
+		showVer   = flag.Bool("version", false, "print the version and exit")
 		status    = flag.Bool("status", false, "print current SMU limits and exit")
 		set       = flag.Uint("set", 0, "apply a TDP limit in watts and exit")
 		cfgPath   = flag.String("config", config.DefaultPath, "path to the config file")
@@ -45,6 +53,11 @@ func main() {
 				"right after a reboot with the daemon stopped.")
 	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println("oxp-tdpd", version)
+		return
+	}
 
 	level := slog.LevelInfo
 	if *verbose {

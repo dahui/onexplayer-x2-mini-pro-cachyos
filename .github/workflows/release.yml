@@ -40,15 +40,27 @@ jobs:
             -o "dist/onexplayer-x2-mini-pro-cachyos-${VERSION}.tar.gz" \
             "${GITHUB_REF_NAME}"
 
-      - name: Build DKMS packages
-        # In a container rather than a container-job, so the Go steps above keep
-        # using the normal runner. Both packages are arch=any and ship source
-        # only -- the user's machine compiles the module -- so a package built
-        # here is portable to any Arch install.
+      - name: Stamp pkgver from the tag
+        # The committed PKGBUILDs carry whatever pkgver was last released, and
+        # nothing bumps them on a tag. Left alone, a v0.1.1 tag builds packages
+        # that still say 0.1.0 -- and for the two whose source= interpolates
+        # $pkgver, that silently fetches the PREVIOUS release's artifacts. v0.1.1
+        # shipped an oxp-tdpd-bin containing v0.1.0's binary exactly this way:
+        # every step passed, because fetching a real file from the wrong release
+        # is indistinguishable from success.
         #
-        # ryzen-smu-x2mini-dkms is shipped here rather than on the AUR because it
-        # forks an existing AUR package and is meant to be deleted once its patch
-        # is upstreamed. The release page keeps it out of that namespace.
+        # aur-publish.sh has always done this rewrite, so without it here the two
+        # channels publish different contents under the same version.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s|^pkgver=.*|pkgver=$VERSION|" packaging/*/PKGBUILD
+          grep -H '^pkgver=' packaging/*/PKGBUILD
+
+      - name: Build the self-contained packages
+        # The two DKMS packages build from sources sitting next to their
+        # PKGBUILDs, so they need nothing that does not exist yet. Both are
+        # arch=any and ship source only -- the user's machine compiles the
+        # module -- so a package built here is portable to any Arch install.
         #
         # Build in a container-local copy, NOT in the bind mount. `chown -R` on
         # /work would hand the runner's whole workspace to the container UID and
@@ -70,32 +82,132 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" dist
           ls -la dist/
 
-      - name: Checksums
-        working-directory: dist
-        run: |
-          sha256sum ./* > SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Publish
+      # --- pass 1 -----------------------------------------------------------
+      # Publish what exists so far, WITHOUT SHA256SUMS. The remaining two
+      # packages source the artifacts above by URL, so those URLs have to be
+      # live before they can be built -- and a draft release does not expose
+      # them at the public download path, so the release must be real by now.
+      #
+      # Withholding SHA256SUMS until everything is uploaded is deliberate. A
+      # checksum file listing only some of the assets is worse than none: both
+      # install scripts verify against it, and "no line for this package" would
+      # have to be distinguished from "checksum mismatch". If the job dies
+      # between the two passes the release simply has no SHA256SUMS, and both
+      # scripts refuse to install rather than installing something unverified.
+      - name: Publish (binary and DKMS packages)
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/oxp-tdpd
             dist/*.pkg.tar.zst
             dist/onexplayer-x2-mini-pro-cachyos-*.tar.gz
-            dist/SHA256SUMS
           body: |
             ## Install
 
             ```bash
-            git clone https://github.com/${{ github.repository }}.git
-            cd onexplayer-x2-mini-pro-cachyos
-            ./install.sh
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
-            `oxp-tdpd` below is statically linked and built from this tag by CI.
-            Verify it against `SHA256SUMS` before use.
+            Installs from the AUR, plus `ryzen-smu-x2mini-dkms` from here.
 
-            **Suspend needs a kernel parameter** that this installer will not set
+            **If the AUR is unavailable**, every package is also attached below
+            and can be installed with pacman alone — no AUR helper:
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-from-release.sh | bash
+            ```
+
+            `oxp-tdpd` is statically linked and built from this tag by CI.
+            Verify everything against `SHA256SUMS` before use.
+
+            **Suspend needs a kernel parameter** that neither installer will set
             for you: `amd_iommu=off mem_sleep_default=s2idle`. Without it the
             machine hangs entering s0ix. It costs the NPU — see `docs/suspend.md`.
+
+      - name: Wait for the release assets to be downloadable
+        # Upload and public availability are not the same instant, and the next
+        # step builds a package whose source= is one of these URLs. Poll rather
+        # than sleep a guessed interval.
+        env:
+          BASE: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsSLI -o /dev/null "$BASE/oxp-tdpd"; then
+              echo "assets are live (after ${i} attempt(s))"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::release assets did not become downloadable within 150s"
+          exit 1
+
+      # --- pass 2 -----------------------------------------------------------
+      - name: Build the release-sourced packages
+        # oxp-tdpd-bin and onexplayer-x2mini fetch the tag archive and the
+        # binary published above, exactly as they do for an AUR user. Building
+        # them here against the live release is therefore also a smoke test of
+        # that path: a broken source= or an asset that never became reachable
+        # fails the release instead of surfacing as a user's failed install.
+        #
+        # They are attached so the whole set can be installed with pacman alone.
+        # The AUR is the normal route, but it has been unavailable for extended
+        # periods, and a package set where three of five come from a channel
+        # that is down is not installable at all.
+        run: |
+          docker run --rm -v "$PWD:/work" archlinux:base-devel bash -c '
+            set -euo pipefail
+            pacman -Syu --noconfirm --needed git
+            useradd -m builder
+            cp -a /work /build
+            chown -R builder /build
+            for p in oxp-tdpd-bin onexplayer-x2mini; do
+              # --nodeps: steamos-manager and inputplumber are CachyOS packages
+              # and do not exist in the Arch repos this container has. They are
+              # runtime dependencies recorded in the package metadata, so they
+              # are still resolved on the user machine at install time.
+              runuser -u builder -- bash -c "cd /build/packaging/$p && makepkg -f --nodeps --noconfirm"
+              cp /build/packaging/$p/*.pkg.tar.zst /work/dist/
+            done
+          '
+          sudo chown -R "$(id -u):$(id -g)" dist
+          ls -la dist/
+
+      - name: Verify every package carries the tag version
+        # Cheap backstop for the failure above, which was invisible precisely
+        # because every step reported success. A package whose filename does not
+        # carry this tag's version was built from stale metadata -- and for the
+        # two release-sourced ones that means stale contents, not just a stale
+        # name.
+        working-directory: dist
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          bad=0
+          for f in *.pkg.tar.zst; do
+            case "$f" in
+              *-"$VERSION"-[0-9]*) echo "ok   $f" ;;
+              *) echo "::error::$f was not built at version $VERSION"; bad=1 ;;
+            esac
+          done
+          exit "$bad"
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          # Now that every artifact is present. Bare filenames, no ./ prefix, so
+          # `sha256sum -c` run from a download directory matches directly.
+          # Listed explicitly rather than by glob so SHA256SUMS can never end up
+          # checksumming itself on a re-run.
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' \
+            | sort | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish (remaining packages and checksums)
+        # Only the two new packages. Re-uploading the ones from pass 1 would
+        # delete and replace identical assets, leaving them briefly missing for
+        # no gain.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/oxp-tdpd-bin-*.pkg.tar.zst
+            dist/onexplayer-x2mini-*.pkg.tar.zst
+            dist/SHA256SUMS
