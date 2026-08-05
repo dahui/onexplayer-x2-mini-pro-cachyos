@@ -4,8 +4,9 @@ Four packages. `makepkg -si` in any of these directories installs it locally,
 and `install.sh` does exactly that for the two kernel modules.
 
 Three of the four also go to the AUR via [`aur-publish.sh`](aur-publish.sh),
-driven by [`../.github/workflows/aur.yml`](../.github/workflows/aur.yml) when a
-release is published. The fourth deliberately does not — see below.
+driven by [`../.github/workflows/aur.yml`](../.github/workflows/aur.yml)
+automatically after a successful release. The fourth deliberately does not —
+see below.
 
 ## The package set
 
@@ -116,9 +117,25 @@ the first push of a valid `PKGBUILD` + `.SRCINFO`, which the script handles.
 
 ## Publishing
 
-Automatic on release publish. To rehearse first — and you should, at least
-once — use the workflow's manual trigger with **dry run** left on, or run it
-locally on any Arch box:
+**Automatic.** Pushing a `v*` tag runs `release.yml`, and `aur.yml` fires when
+that completes successfully, publishing all three packages.
+
+### Why the trigger is `workflow_run` and not `release: published`
+
+The obvious trigger does not work. **GitHub does not start workflows from events
+created with `GITHUB_TOKEN`**, so a release published by our own `release.yml`
+never fires a `release` trigger — v0.1.0 demonstrated this by silently doing
+nothing at all. `workflow_run` keys off the upstream workflow *completing*,
+which is not subject to that restriction.
+
+It checks out `workflow_run.head_sha` rather than the default branch, so the
+PKGBUILDs and their local sources match the artifacts being hashed, and it only
+runs when the release actually succeeded and the ref was a tag.
+
+### Rehearsing
+
+To rehearse — worth doing at least once — use the manual trigger with **dry run**
+left on, or run it locally on any Arch box:
 
 ```bash
 ./packaging/aur-publish.sh --version 0.1.0 --dry-run
@@ -157,9 +174,12 @@ pinned upstream git source in `ryzen-smu-x2mini-dkms`.
 ## Release order
 
 ```
-git tag v0.1.0 && git push --tags
+git tag v0.1.1 && git push origin v0.1.1
   └─ release.yml   oxp-tdpd (static) + both DKMS .pkg.tar.zst
                    + source tarball + SHA256SUMS
-       └─ aur.yml  hashes those artifacts, pushes 3 packages to the AUR
-                   (ryzen-smu-x2mini-dkms stays on the release page)
+       └─ aur.yml  (workflow_run, automatic) hashes those artifacts and
+                   pushes 3 packages to the AUR
+                   ryzen-smu-x2mini-dkms stays on the release page
 ```
+
+Nothing else is needed for a release: tag, and the rest follows.

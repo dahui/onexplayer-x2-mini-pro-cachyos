@@ -1,12 +1,20 @@
 name: Publish to AUR
 
-# Runs after a release is published, never on a tag directly: the PKGBUILDs
-# hash the release artifacts, so those must already be uploaded. Splitting this
-# from release.yml also means it can be re-run on its own if an AUR push fails
-# without rebuilding the release.
+# Runs automatically after a successful Release, and never on the tag directly:
+# the PKGBUILDs hash the release artifacts, so those must already be uploaded.
+#
+# The trigger is `workflow_run`, NOT `release: published`. GitHub deliberately
+# does not start workflows from events created with GITHUB_TOKEN, so a release
+# published by our own release.yml never fires a `release` trigger -- v0.1.0
+# proved that by silently doing nothing. `workflow_run` keys off the upstream
+# workflow completing instead, which is not subject to that restriction.
+#
+# Keeping this separate from release.yml means a failed AUR push can be re-run
+# on its own without rebuilding the release.
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -25,6 +33,13 @@ permissions:
 
 jobs:
   publish:
+    # Only after a Release that actually succeeded, and only for tag runs --
+    # `head_branch` carries the tag name for tag-triggered workflows. A manual
+    # dispatch always runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     # makepkg, updpkgsums and makepkg --printsrcinfo only exist on Arch.
     container: archlinux:base-devel
@@ -33,6 +48,11 @@ jobs:
         run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
 
       - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch by default. Take the
+          # exact commit the Release was built from, so the PKGBUILDs and their
+          # local sources match the artifacts being hashed.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Create build user
         # makepkg refuses to run as root, and the container is root by default.
@@ -70,6 +90,9 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             V="${{ github.event.inputs.version }}"
+          elif [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
+            # The tag that triggered the Release, e.g. v0.1.0
+            V="${{ github.event.workflow_run.head_branch }}"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -81,9 +104,18 @@ jobs:
           AUR_USERNAME: ${{ vars.AUR_USERNAME }}
           AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
+          # dry_run and only are set only by a manual dispatch; an automatic run
+          # after a release always pushes for real. Written as explicit ifs
+          # rather than `[ ] && ...` -- under `bash -e` a false test as the last
+          # statement would fail the step, and this is the one path that cannot
+          # be rehearsed before a real release.
           ARGS="--version ${{ steps.ver.outputs.version }}"
-          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
-          [ -n "${{ github.event.inputs.only }}" ] && ARGS="$ARGS --only ${{ github.event.inputs.only }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            ARGS="$ARGS --only ${{ github.event.inputs.only }}"
+          fi
           # shellcheck disable=SC2086
           runuser -u builder -- env \
             AUR_USERNAME="$AUR_USERNAME" AUR_EMAIL="$AUR_EMAIL" \
