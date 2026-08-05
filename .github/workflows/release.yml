@@ -49,17 +49,25 @@ jobs:
         # ryzen-smu-x2mini-dkms is shipped here rather than on the AUR because it
         # forks an existing AUR package and is meant to be deleted once its patch
         # is upstreamed. The release page keeps it out of that namespace.
+        #
+        # Build in a container-local copy, NOT in the bind mount. `chown -R` on
+        # /work would hand the runner's whole workspace to the container UID and
+        # leave later steps unable to write there -- which is exactly how the
+        # first v0.1.0 attempt died, on "SHA256SUMS: Permission denied".
         run: |
-          docker run --rm -v "$PWD:/work" -w /work archlinux:base-devel bash -c '
+          docker run --rm -v "$PWD:/work" archlinux:base-devel bash -c '
             set -euo pipefail
             pacman -Syu --noconfirm --needed git
             useradd -m builder
-            chown -R builder /work
+            cp -a /work /build
+            chown -R builder /build
             for p in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
-              runuser -u builder -- bash -c "cd packaging/$p && makepkg -f --nodeps --noconfirm"
-              cp packaging/$p/*.pkg.tar.zst dist/
+              runuser -u builder -- bash -c "cd /build/packaging/$p && makepkg -f --nodeps --noconfirm"
+              cp /build/packaging/$p/*.pkg.tar.zst /work/dist/
             done
           '
+          # Artifacts land root-owned from the container; hand them back.
+          sudo chown -R "$(id -u):$(id -g)" dist
           ls -la dist/
 
       - name: Checksums
