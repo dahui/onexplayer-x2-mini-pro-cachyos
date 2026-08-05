@@ -1,6 +1,6 @@
-From 850d488dfa5781697b9fbdbe7b5956df09216bea Mon Sep 17 00:00:00 2001
+From d6c985dc19aad03762aba327e0180cb2cc08b5f0 Mon Sep 17 00:00:00 2001
 From: Jeff Hagadorn <jeff@aletheia.io>
-Date: Wed, 5 Aug 2026 10:29:39 -0700
+Date: Wed, 5 Aug 2026 10:51:57 -0700
 Subject: [PATCH] smu: add Strix Halo PM table version 0x64010C
 
 The ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388, SMU v10.100.6.0) reports PM
@@ -33,7 +33,7 @@ Signed-off-by: Jeff Hagadorn <jeff@aletheia.io>
  1 file changed, 6 insertions(+)
 
 diff --git a/smu.c b/smu.c
-index 6eae6dc..3636bb6 100644
+index 6eae6dc..3636bb6 100755
 --- a/smu.c
 +++ b/smu.c
 @@ -1153,6 +1153,12 @@ u32 smu_update_pmtable_size(u32 version) {

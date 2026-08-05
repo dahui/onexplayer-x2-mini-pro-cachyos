@@ -49,7 +49,7 @@ source=("ryzen_smu::git+https://github.com/$_upstream.git#commit=$_commit"
 # The git source stays SKIP -- it is pinned to a commit, and updpkgsums will
 # happily replace this with a hash of the checkout, which is not reproducible.
 sha256sums=('SKIP'
-            '229b1d7c6967f46e0317872a09bd2f8e2f25738abafccf97528f38a50e70e90d')
+            '6a9d1dfc74e4832d3459359a00a67f3a8122970d0a4ece429d5f536aa2e927d4')
 
 prepare() {
 	cd "$srcdir/ryzen_smu" || exit 1
