@@ -24,10 +24,29 @@ compiles the module against its own kernel. That is what makes a CI-built
 `.pkg.tar.zst` portable to any Arch install, and why the release page is a
 viable distribution channel rather than a second-class one.
 
-`onexplayer-x2mini` hard-depends on `steamos-manager`, `oxp-tdpd` and
-`oxpec-x2mini-dkms`, and *opt*-depends on `inputplumber`,
-`ryzen-smu-x2mini-dkms` and `gamescope`. So the meta package still installs if
-someone skips the ryzen_smu fork — they lose TDP read-back, not TDP control.
+### Dependencies pull their own weight
+
+Neither `steamos-manager` nor `inputplumber` is installed by default on CachyOS
+Handheld Edition, so both are **hard** dependencies of `onexplayer-x2mini`. That
+matters more than it looks: this package ships configuration *for* each of them,
+and those files are inert without the daemon that reads them. Left optional, a
+fresh install would lay the configs down correctly and the buttons or the TDP
+slider would simply do nothing, with no error anywhere.
+
+Two things stay optional, for reasons rather than by omission:
+
+- **`ryzen-smu-x2mini-dkms`** cannot be a hard dependency — it is not on the AUR
+  (see below), so the reference would be unresolvable. TDP *control* works
+  without it; only read-back falls back to a cached value.
+- **`gamescope`** is left optional so this package does not drag a compositor
+  onto a non-gaming install. The display script is inert without it, and
+  harmless.
+
+**Kernel headers are not a dependency either**, following the usual DKMS
+convention — the right package depends on which kernel is installed. Both DKMS
+packages instead check at install time and print the exact command, because the
+failure mode is otherwise silent: no headers means the module never builds and
+the feature just does not work.
 
 Note `depends=('oxp-tdpd')` is satisfied by `oxp-tdpd-bin` through
 `provides=`. AUR helpers resolve that; bare `makepkg` does not, which is

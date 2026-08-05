@@ -19,15 +19,27 @@ pkgdesc="ONEXPLAYER X2Mini PRO enablement: steamos-manager, InputPlumber, HDR an
 arch=('any')
 url="https://github.com/dahui/$_reponame"
 license=('GPL-2.0-only')
+# Hard dependencies, because this package ships configuration FOR each of them
+# and those files are inert without it. Neither steamos-manager nor inputplumber
+# is installed by default on CachyOS Handheld Edition, so leaving either
+# optional means the buttons or the TDP slider silently do nothing on a fresh
+# install -- with no error, because the config files land correctly and simply
+# have nothing reading them.
 depends=(
-	'steamos-manager'
-	'oxp-tdpd'
-	'oxpec-x2mini-dkms'
+	'steamos-manager'   # reads the device profile; exposes the TDP slider
+	'inputplumber'      # reads devices.d + capability_maps.d; hwdb autostarts it
+	'oxp-tdpd'          # the TDP backend steamos-manager proxies to
+	'oxpec-x2mini-dkms' # fan + charge limit
 )
 optdepends=(
-	'inputplumber: extra button mapping (OneXPlayer -> QAM, Keyboard/Home -> Steam+X)'
-	'ryzen-smu-x2mini-dkms: TDP read-back, and keeps ryzenadj working'
-	'gamescope: HDR display script'
+	# NOT a hard dependency, and it cannot be: this package is not on the AUR
+	# (it forks ryzen_smu-dkms-git and is meant to be temporary), so a hard
+	# depend would be unresolvable for AUR users. TDP *control* works without
+	# it; only read-back degrades to a cached value.
+	'ryzen-smu-x2mini-dkms: TDP read-back from the SMU PM table, and keeps ryzenadj working. Not on the AUR -- see the GitHub releases page'
+	# The display script is inert without gamescope, and harmless. Left optional
+	# so this package does not drag a compositor onto a non-gaming install.
+	'gamescope: HDR support via the bundled display script'
 )
 install="$pkgname.install"
 source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")

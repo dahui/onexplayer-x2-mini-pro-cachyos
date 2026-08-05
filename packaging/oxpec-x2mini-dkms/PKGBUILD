@@ -25,6 +25,7 @@ arch=('any')
 url="https://github.com/dahui/onexplayer-x2-mini-pro-cachyos"
 license=('GPL-2.0-or-later')
 depends=('dkms')
+install="$pkgname.install"
 provides=('oxpec-x2mini')
 conflicts=('oxpec-x2mini')
 source=('oxpec.c' 'Makefile' 'dkms.conf')

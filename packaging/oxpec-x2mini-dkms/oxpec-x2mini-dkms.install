@@ -1,0 +1,36 @@
+_check_headers() {
+	local kver pkgbase
+	kver="$(uname -r)"
+
+	[ -d "/usr/lib/modules/$kver/build" ] && return 0
+
+	# Deliberately not a hard dependency: the correct headers package depends on
+	# which kernel is installed (linux-cachyos-deckify-headers here, but it
+	# varies), and DKMS packages conventionally leave it to the user. So warn
+	# loudly instead -- without headers the module simply never builds, and the
+	# only symptom is a feature that quietly does not work.
+	pkgbase="$(cat "/usr/lib/modules/$kver/pkgbase" 2>/dev/null || true)"
+
+	echo
+	echo "WARNING: no kernel headers found for $kver."
+	echo "         DKMS cannot build oxpec, so fan control and the charge limit"
+	echo "         will not work until they are installed:"
+	echo
+	if [ -n "$pkgbase" ]; then
+		echo "    sudo pacman -S ${pkgbase}-headers"
+	else
+		echo "    sudo pacman -S <your-kernel>-headers"
+	fi
+	echo "    sudo dkms autoinstall"
+	echo
+}
+
+post_install() {
+	_check_headers
+	echo "==> oxpec builds against the running kernel and rebuilds on kernel updates."
+	echo "    Load it now with: sudo modprobe oxpec"
+}
+
+post_upgrade() {
+	_check_headers
+}
