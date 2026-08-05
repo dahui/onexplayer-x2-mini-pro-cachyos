@@ -46,8 +46,10 @@ provides=("ryzen_smu-dkms=$_modver")
 # checkout and attach it to the release, so it never needs to go to the AUR.
 source=("ryzen_smu::git+https://github.com/$_upstream.git#commit=$_commit"
         "0001-ryzen_smu-add-pm-table-0x64010C.patch")
+# The git source stays SKIP -- it is pinned to a commit, and updpkgsums will
+# happily replace this with a hash of the checkout, which is not reproducible.
 sha256sums=('SKIP'
-            'db89ee33aafcbb1f0fd47fce82e7b297cb7a98e678b83c2bab2ca479b3c63fc2')
+            '229b1d7c6967f46e0317872a09bd2f8e2f25738abafccf97528f38a50e70e90d')
 
 prepare() {
 	cd "$srcdir/ryzen_smu" || exit 1

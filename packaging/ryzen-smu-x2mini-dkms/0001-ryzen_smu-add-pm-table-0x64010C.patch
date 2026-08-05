@@ -1,4 +1,6 @@
+From 850d488dfa5781697b9fbdbe7b5956df09216bea Mon Sep 17 00:00:00 2001
 From: Jeff Hagadorn <jeff@aletheia.io>
+Date: Wed, 5 Aug 2026 10:29:39 -0700
 Subject: [PATCH] smu: add Strix Halo PM table version 0x64010C
 
 The ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388, SMU v10.100.6.0) reports PM
@@ -8,8 +10,10 @@ Probing fails with:
     ryzen_smu: Unknown PM table version: 0x0064010C
     ryzen_smu: Failed to probe the PM table -- disabling feature (249)
 
-leaving pm_table, pm_table_size and pm_table_version unexposed, so ryzenadj
-cannot initialise at all ("Unable to get os_access Obj, check permission").
+leaving pm_table, pm_table_size and pm_table_version unexposed. That costs
+more than read-back: with ryzen_smu loaded but unable to probe, ryzenadj
+fails at init with "Unable to get os_access Obj, check permission", which
+reads like a permissions problem and is not.
 
 The version differs from the already-supported 0x64020C only in the middle
 byte, and the same 0xE50 size applies. Verified on hardware: after writing
@@ -20,23 +24,31 @@ slow 47 W), the table reads back
     offset 0x8  = 53.000004   (PPT limit fast)
     offset 0x10 = 47.000004   (PPT limit slow)
 
-matching the documented layout, and `ryzenadj -i` reports the same values.
+matching the documented layout, and `ryzenadj -i` reports the same values
+independently.
 
 Signed-off-by: Jeff Hagadorn <jeff@aletheia.io>
 ---
+ smu.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/smu.c b/smu.c
+index 6eae6dc..3636bb6 100644
 --- a/smu.c
 +++ b/smu.c
-@@ -1153,6 +1153,13 @@
+@@ -1153,6 +1153,12 @@ u32 smu_update_pmtable_size(u32 version) {
      break;
    case CODENAME_STRIXHALO:
      switch (version) {
-+    case 0x64010C: // ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388), SMU v10.100.6.0
-+      // Size is not published by AMD; borrowed from the sibling 0x64020C table,
-+      // which differs only in the middle byte. Validated empirically: the
-+      // stapm/fast/slow floats at offsets 0x0/0x8/0x10 read back the values
-+      // written via MP1 messages 0x14/0x15/0x16.
-+      g_smu.pm_dram_map_size = 0xE50;
-+      break;
++    // 0x64010C is the ONEXPLAYER X2Mini PRO (Ryzen AI MAX+ 388, SMU
++    // v10.100.6.0). It differs from 0x64020C only in the middle byte and takes
++    // the same size, which is not published by AMD and was validated on
++    // hardware: after writing distinct limits via MP1 messages 0x14/0x15/0x16,
++    // the stapm/fast/slow floats at offsets 0x0/0x8/0x10 read them back.
++    case 0x64010C:
      case 0x64020C:
        g_smu.pm_dram_map_size = 0xE50;
        break;
+-- 
+2.55.0
+

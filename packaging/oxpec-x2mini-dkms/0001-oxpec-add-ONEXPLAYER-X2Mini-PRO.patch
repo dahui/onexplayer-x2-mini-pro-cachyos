@@ -1,33 +1,35 @@
+From 451f6910b17042e071ef0fbf25879cd392326875 Mon Sep 17 00:00:00 2001
 From: Jeff Hagadorn <jeff@aletheia.io>
-Subject: [PATCH] platform/x86: oxpec: add ONEXPLAYER X2Mini PRO
+Date: Wed, 5 Aug 2026 10:28:49 -0700
+Subject: [PATCH] platform/x86: oxpec: Add support for OneXPlayer X2 Mini Pro
 
-The ONEXPLAYER X2Mini PRO ships the same system board as the ONEXPLAYER
-APEX, which is already handled as oxp_fly. The only thing that keeps the
-driver from binding is the DMI board name, so add an entry pointing at
-the same board type.
-
-Verified on the unit:
-  /sys/class/dmi/id/board_vendor -> ONE-NETBOOK
-  /sys/class/dmi/id/board_name   -> ONEXPLAYER X2Mini PRO
-
-Without this, `modprobe oxpec` fails with ENODEV and the machine has no
-route to TDP control, fan control, or a battery charge limit.
+OneXPlayer X2 Mini Pro is a new Strix Halo handheld. It ships the same
+system board as the OneXPlayer APEX and uses the same registers as the
+OneXPlayer Fly devices. Add a quirk for it to the oxpec driver.
 
 Signed-off-by: Jeff Hagadorn <jeff@aletheia.io>
 ---
+ drivers/platform/x86/oxpec.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/platform/x86/oxpec.c b/drivers/platform/x86/oxpec.c
+index 99c0dfc..34bb17f 100644
 --- a/drivers/platform/x86/oxpec.c
 +++ b/drivers/platform/x86/oxpec.c
-@@ -152,6 +152,13 @@
- 	{
- 		.matches = {
- 			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
+@@ -289,6 +289,13 @@ static const struct dmi_system_id dmi_table[] = {
+ 		},
+ 		.driver_data = (void *)oxp_x1,
+ 	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
 +			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER X2Mini PRO"),
 +		},
 +		.driver_data = (void *)oxp_fly,
 +	},
-+	{
-+		.matches = {
-+			DMI_MATCH(DMI_BOARD_VENDOR, "ONE-NETBOOK"),
- 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "ONEXPLAYER APEX"),
- 		},
- 		.driver_data = (void *)oxp_fly,
+ 	{},
+ };
+ 
+-- 
+2.55.0
+

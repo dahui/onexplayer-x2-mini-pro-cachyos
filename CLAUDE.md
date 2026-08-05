@@ -495,6 +495,58 @@ the normal repos. Check `uname -r` before assuming this section is stale.
 
 Protocol credit: `github.com/rmckayfleming/onexplayer-apex-cachyos`.
 
+### hid-oxp is in mainline, and it documents this protocol officially
+
+`drivers/hid/hid-oxp.c` is now in Linus's tree (maintainer Derek J. Clark,
+`linux-input@vger.kernel.org`). Two things follow, both checked against the
+mainline source rather than assumed.
+
+**It already binds this controller — no patch needed.** Its device table matches
+`USB_VENDOR_ID_WCH` (`0x1a86`) / `USB_DEVICE_ID_ONEXPLAYER_GEN2` (`0xfe00`),
+which is exactly the interface reverse-engineered above.
+
+**Its constants confirm what was derived by hand**, and name the rest:
+
+| hid-oxp | value | matches |
+|---|---|---|
+| `GEN2_MESSAGE_ID` | `0x3f` | the `[cid, 0x3F, idx] … [0x3F, cid]` framing |
+| `OXP_FID_GEN2_TOGGLE_MODE` | `0xb2` | button reports / full-intercept mode |
+| `OXP_FID_GEN2_RUMBLE_SET` | `0xb3` | — |
+| `OXP_FID_GEN2_KEY_STATE` | `0xb4` | — |
+| `OXP_FID_GEN2_STATUS_EVENT` | `0xb8` | **RGB**, both read and write |
+
+So rumble and RGB are reachable over the same hidraw interface, on the current
+kernel, without waiting for 7.2. RGB writes are
+`oxp_gen_2_property_out(0xb8, {OXP_SET_PROPERTY, 0x00, 0x02, enabled, speed,
+brightness}, 6)`, and state is read back from inbound `0xb8` frames as
+`struct oxp_gen_2_rgb_report`: `enabled, speed, brightness, red, green, blue` at
+bytes 6–11, `effect` at byte 15.
+
+### An open question that decides a kernel patch
+
+`hid-oxp` keeps `oxp_hybrid_mcu_list` — currently the APEX, G1 A and G1 i. Devices
+on it **skip RGB LED registration** on the GEN2 usage page:
+
+```c
+if (up == GEN2_USAGE_PAGE && oxp_hybrid_mcu_device())
+	goto skip_rgb;
+```
+
+It is not fatal — it gates only the RGB class device, so the paddles work either
+way. But this machine is not on that list, so 7.2 will try to register RGB here.
+
+Whether that is right is **untested and decides whether a fourth patch is owed**:
+
+- If RGB works over the `0xb8` path, the absence is correct — being added would
+  *lose* RGB.
+- If it does not, an entry is needed, or 7.2 registers an LED device that does
+  nothing.
+
+The APEX shares this board and *is* on the list, which is weak evidence for the
+second. Weak, not conclusive: "hybrid MCU" plausibly describes where the RGB
+controller lives, and the two machines' controllers already differ (§7). Testing
+the `0xb8` write on the current kernel settles it before 7.2 arrives.
+
 ### Three traps that each cost a debugging round
 
 1. **`gamepad:Keyboard` works, but Steam+X does not open the keyboard from the
@@ -636,7 +688,8 @@ any of this. Check `uname -r` before assuming the rows below are stale.
 
 | Item | Needs | Confidence | Effect |
 |---|---|---|---|
-| Back paddles | 7.2 (`hid-oxp`) | **Expected** — merged for 7.2 | Valve-authored driver that manages vendor intercept mode. Today the paddles emit nothing and enabling intercept by hand silences the entire X-Box gamepad (§7), so there is no usable workaround. |
+| Back paddles | 7.2 (`hid-oxp`) | **Likely** — in mainline, and its device table already matches `1a86:fe00` (§7) | Valve-authored driver that manages vendor intercept mode. Today the paddles emit nothing and enabling intercept by hand silences the entire X-Box gamepad (§7), so there is no usable workaround. |
+| RGB and rumble | *not* a kernel version | **Available now** | `hid-oxp` documents the GEN2 frames (§7), so both are reachable over hidraw on 7.1.6. 7.2 would add a proper LED class device — but only if the `oxp_hybrid_mcu_list` question in §7 resolves the right way. |
 | Dropping `amd_iommu=off` | a kernel that fixes s0ix entry | **Unproven** | Would restore the NPU and DMA remapping while keeping suspend. Cheap and reversible to test: remove the parameter, reboot, run `suspend/suspend-test.sh ladder`. |
 | Custom Home mapping | *not* a kernel fix | **Unlikely from 7.2** | Blocked by an InputPlumber 0.78 userspace bug (§7). `hid-oxp` might sidestep it by reporting button `0x24` differently, but nothing guarantees that. |
 

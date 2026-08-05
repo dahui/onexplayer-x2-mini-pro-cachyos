@@ -12,3 +12,6 @@
 /packaging/*/src/
 /packaging/*/*.pkg.tar.*
 /packaging/*/*.tar.gz
+
+# updpkgsums and makepkg clone VCS sources next to the PKGBUILD
+/packaging/ryzen-smu-x2mini-dkms/ryzen_smu/

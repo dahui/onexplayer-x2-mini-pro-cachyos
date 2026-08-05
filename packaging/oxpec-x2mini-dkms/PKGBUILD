@@ -29,7 +29,7 @@ install="$pkgname.install"
 provides=('oxpec-x2mini')
 conflicts=('oxpec-x2mini')
 source=('oxpec.c' 'Makefile' 'dkms.conf')
-sha256sums=('fd5c591338ef01abd7e517573cea10fc0a13595d181a5791aadec03627350067'
+sha256sums=('254499952d4b2383b0cee42e3349323023e3e9624aa269628de92835568e20f7'
             '32dae33d7bf42c42e987e3b08a6793dd57527add921a39398beb3e76d942ddf1'
             'b59d2d967a2cb63adc3b49e8c90adc648924d001944ffa1dcb81226978d5aa70')
 
