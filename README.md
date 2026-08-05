@@ -32,12 +32,12 @@ Home mapping** (InputPlumber bug). See [what's still broken](#whats-still-broken
 ## Install
 
 ```bash
-git clone https://github.com/dahui/onexplayer-x2-mini-pro-cachyos.git
-cd onexplayer-x2-mini-pro-cachyos
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install.sh | bash
 ```
 
-That is the whole thing. Everything ships as a pacman package, so the script
+No clone needed — everything it installs is an AUR package or a checksum-verified
+package from the [releases page](../../releases), so there is nothing in this
+repository the script requires. Everything ships as a pacman package, so the script
 installs those and gets out of the way — it never copies configuration into
 place itself, which is what keeps a package install and a script install from
 drifting apart.
@@ -48,27 +48,23 @@ drifting apart.
 | `steamos-manager`, `inputplumber` | repos — **not installed by default** on Handheld Edition |
 | `oxp-tdpd-bin` | AUR — the TDP daemon, prebuilt, so no Go toolchain |
 | `oxpec-x2mini-dkms` | AUR — fan and charge limit |
-| `ryzen-smu-x2mini-dkms` | built from this checkout — [not on the AUR by design](packaging/README.md) |
+| `ryzen-smu-x2mini-dkms` | downloaded from the releases page, checksum-verified — [not on the AUR by design](packaging/README.md) |
 
-`./install.sh --dry-run` shows exactly what it would do first, which is worth a
-look since this installs kernel modules and a root daemon. Other flags:
-`--skip-ryzen-smu`, `--force`.
-
-Prefer to skip the script? `paru -S onexplayer-x2mini` gets you everything
-except the ryzen_smu fork, which lives on the
-[releases page](../../releases). The script exists to do both, start the
-services, and tell you about the kernel parameter below.
-
-<details>
-<summary>One-liner, if you have already read the above</summary>
+Piping a script from the internet into `bash` deserves a look first — it
+installs kernel modules and a root daemon:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install.sh | less
+curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install.sh | bash -s -- --dry-run
 ```
 
-Downloads the latest release, verifies its checksum, and runs `install.sh`.
-Arguments pass through: `... | bash -s -- --dry-run`.
-</details>
+Flags: `--dry-run`, `--skip-ryzen-smu`, `--force`. `OXP_TAG=v0.1.0` pins a
+release instead of taking the latest.
+
+Prefer to skip the script entirely? `paru -S onexplayer-x2mini` gets you
+everything except the ryzen_smu fork, which lives on the
+[releases page](../../releases). The script exists to do both, start the
+services, and tell you about the kernel parameter below.
 
 <details>
 <summary>Or with pacman-managed packages</summary>
