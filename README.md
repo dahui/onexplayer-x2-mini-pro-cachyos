@@ -37,12 +37,27 @@ cd onexplayer-x2-mini-pro-cachyos
 ./install.sh
 ```
 
-That is the whole thing. It installs dependencies with `paru`, builds the two
-DKMS modules, installs the TDP daemon, and lays down the configs — in an order
-that matters. `./install.sh --dry-run` shows exactly what it would do first,
-which is worth a look since this installs kernel modules and a root daemon.
+That is the whole thing. Everything ships as a pacman package, so the script
+installs those and gets out of the way — it never copies configuration into
+place itself, which is what keeps a package install and a script install from
+drifting apart.
 
-Useful flags: `--skip-hdr`, `--skip-input`, `--no-deps`, `--force`.
+| | |
+|---|---|
+| `onexplayer-x2mini` | AUR — the configs; pulls in everything below |
+| `steamos-manager`, `inputplumber` | repos — **not installed by default** on Handheld Edition |
+| `oxp-tdpd-bin` | AUR — the TDP daemon, prebuilt, so no Go toolchain |
+| `oxpec-x2mini-dkms` | AUR — fan and charge limit |
+| `ryzen-smu-x2mini-dkms` | built from this checkout — [not on the AUR by design](packaging/README.md) |
+
+`./install.sh --dry-run` shows exactly what it would do first, which is worth a
+look since this installs kernel modules and a root daemon. Other flags:
+`--skip-ryzen-smu`, `--force`.
+
+Prefer to skip the script? `paru -S onexplayer-x2mini` gets you everything
+except the ryzen_smu fork, which lives on the
+[releases page](../../releases). The script exists to do both, start the
+services, and tell you about the kernel parameter below.
 
 <details>
 <summary>One-liner, if you have already read the above</summary>

@@ -2,20 +2,27 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2026 Jeff Hagadorn <jeff@aletheia.io>
 #
-# ONEXPLAYER X2Mini PRO enablement -- the only command you need to run.
+# ONEXPLAYER X2Mini PRO enablement -- installs packages, nothing by hand.
 #
-# Installs, in an order that matters:
-#   oxpec       fan RPM/PWM + battery charge limit (patched EC driver)
-#   ryzen_smu   PM table 0x64010C, without which ryzenadj breaks outright
-#   oxp-tdpd    gives Steam's TDP slider a backend (10-85 W)
-#   input       InputPlumber profile + capability map + steamos-manager config
-#   HDR         one gamescope display script -- no session patching needed
+# Everything ships as a pacman package, so this script installs those and gets
+# out of the way. It deliberately does NOT copy configuration into place itself:
+# those files are owned by onexplayer-x2mini, and writing them separately would
+# leave pacman reporting them as modified and the two paths free to drift.
 #
-# Deliberately does NOT touch the kernel command line. Suspend needs
-# amd_iommu=off, which costs the NPU, so that stays a conscious choice -- this
+#   onexplayer-x2mini        AUR   configs; pulls in everything below
+#     steamos-manager        repo  TDP slider, performance profiles
+#     inputplumber           repo  button mapping
+#     oxp-tdpd-bin           AUR   TDP daemon (prebuilt -- no Go toolchain)
+#     oxpec-x2mini-dkms      AUR   fan + charge limit
+#   ryzen-smu-x2mini-dkms    local TDP read-back; built from packaging/
+#
+# ryzen-smu-x2mini-dkms is the one exception. It forks an existing AUR package
+# and is meant to disappear once its patch is upstreamed, so it is not published
+# to the AUR -- see packaging/README.md. It is built from this checkout instead.
+#
+# The kernel command line is left alone on purpose: suspend needs
+# amd_iommu=off, which costs the NPU, so that stays a conscious choice. This
 # script only tells you what to add.
-#
-# Idempotent. Backs up anything it replaces to <file>.bak-<timestamp>.
 #
 # See README.md, and docs/ for why any of it is necessary.
 
@@ -25,33 +32,32 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
 source "$SRC/scripts/lib.sh"
 
-SKIP_HDR=0
-SKIP_INPUT=0
-SKIP_DEPS=0
+SKIP_RYZEN_SMU=0
 FORCE="${FORCE:-0}"
 
 usage() {
 	cat <<-EOF
 	Usage: $0 [options]
 
-	  --skip-hdr      leave gamescope/HDR alone
-	  --skip-input    leave InputPlumber and the button mapping alone
-	  --no-deps       do not install packages with paru
-	  --dry-run       print what would happen, change nothing
-	  --force         install even if this is not an X2Mini
-	  -h, --help      this text
+	  --skip-ryzen-smu   do not build the ryzen_smu fork (loses TDP read-back)
+	  --dry-run          print what would happen, change nothing
+	  --force            install even if this is not an X2Mini
+	  -h, --help         this text
+
+	To install a single component, or to install your working tree rather than
+	the released version, use makepkg directly:
+
+	  cd packaging/<package> && makepkg -si
 	EOF
 }
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-		--skip-hdr)   SKIP_HDR=1 ;;
-		--skip-input) SKIP_INPUT=1 ;;
-		--no-deps)    SKIP_DEPS=1 ;;
-		--dry-run)    DRY_RUN=1 ;;
-		--force)      FORCE=1 ;;
-		-h|--help)    usage; exit 0 ;;
-		*)            echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
+		--skip-ryzen-smu) SKIP_RYZEN_SMU=1 ;;
+		--dry-run)        DRY_RUN=1 ;;
+		--force)          FORCE=1 ;;
+		-h|--help)        usage; exit 0 ;;
+		*)                echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
 	esac
 	shift
 done
@@ -61,181 +67,78 @@ export DRY_RUN FORCE
 
 require_x2mini
 
-# --- dependencies -----------------------------------------------------------
-install_deps() {
-	say "Dependencies"
+[[ $EUID -eq 0 ]] && die "run this as your normal user, not root.
+    makepkg refuses to build as root, and paru will call sudo when it needs to."
 
-	if ! have paru; then
-		die "paru not found, and it is needed for the AUR packages.
-    Install it first, or re-run with --no-deps and handle dependencies yourself:
-      https://github.com/Morganamilo/paru"
-	fi
+have paru || die "paru not found, and the packages live in the AUR.
+    Install it first: https://github.com/Morganamilo/paru"
 
-	local want=(dkms inputplumber steamos-manager)
-
-	# DKMS needs headers matching the *running* kernel. Derive rather than
-	# hardcode, so this works on any CachyOS/Arch kernel flavour.
-	local hdrs
+# --- kernel headers ---------------------------------------------------------
+# DKMS needs headers matching the *running* kernel. The packages cannot depend
+# on them -- the right one varies by kernel -- so resolve it here, deriving the
+# name rather than hardcoding a CachyOS flavour.
+say "Kernel headers"
+if have_kernel_headers; then
+	note "present for $(uname -r)"
+else
 	hdrs="$(kernel_headers_pkg || true)"
-	if have_kernel_headers; then
-		note "kernel headers present for $(uname -r)"
-	elif [[ -n "$hdrs" ]]; then
-		note "kernel headers missing, will install $hdrs"
-		want+=("$hdrs")
-	else
-		warn "cannot determine the kernel headers package; DKMS builds may fail"
-	fi
-
-	# Only used for manually inspecting the panel's EDID; nothing here requires
-	# it. Kept because it is what you reach for when HDR misbehaves.
-	[[ "$SKIP_HDR" == "1" ]] || want+=(edid-decode)
-
-	note "installing: ${want[*]}"
+	[[ -n "$hdrs" ]] || die "no kernel headers for $(uname -r), and the package
+    name could not be derived. Install your kernel's -headers package."
+	note "missing -- installing $hdrs"
 	if [[ "$DRY_RUN" == "1" ]]; then
-		printf '    \033[2m[dry-run] paru -S --needed %s\033[0m\n' "${want[*]}"
+		note "[dry-run] paru -S --needed $hdrs"
 	else
-		paru -S --needed --noconfirm "${want[@]}"
+		paru -S --needed --noconfirm "$hdrs"
 	fi
-}
+fi
 
-[[ "$SKIP_DEPS" == "1" ]] && say "Skipping dependencies (--no-deps)" || install_deps
+# --- the ryzen_smu fork, built locally --------------------------------------
+# Not on the AUR by design. Build it before the meta package so that if the user
+# already has ryzen_smu-dkms-git installed, the conflict is resolved up front
+# rather than midway through a larger transaction.
+if [[ "$SKIP_RYZEN_SMU" == "0" ]]; then
+	say "ryzen-smu-x2mini-dkms (from this checkout)"
+	if [[ "$DRY_RUN" == "1" ]]; then
+		note "[dry-run] cd packaging/ryzen-smu-x2mini-dkms && makepkg -si"
+	else
+		note "this replaces ryzen_smu-dkms-git if present -- that is intended,"
+		note "it is what stops a package update reverting the PM table patch"
+		( cd "$SRC/packaging/ryzen-smu-x2mini-dkms" && makepkg -si --needed --noconfirm ) \
+			|| die "ryzen-smu-x2mini-dkms failed to build or install"
+	fi
+else
+	say "Skipping ryzen-smu-x2mini-dkms (--skip-ryzen-smu)"
+	note "TDP control will still work; read-back falls back to a cached value"
+fi
 
-# --- kernel modules ---------------------------------------------------------
-# Installed as real pacman packages, not staged into /usr/src by hand. That
-# matters for ryzen-smu-x2mini-dkms in particular: it carries
-# conflicts=('ryzen_smu-dkms-git'), which is what stops a ryzen_smu-dkms-git
-# update replacing /usr/src wholesale and silently dropping our PM table patch --
-# leaving a loaded-but-unpatched module that breaks ryzenadj with an error
-# reading like a permissions problem.
-#
-# Both are arch=any and ship source only; DKMS compiles them against the running
-# kernel and rebuilds on kernel updates.
-install_kernel_modules() {
-	say "Kernel modules"
-
-	for pkg in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
-		if [[ "$DRY_RUN" == "1" ]]; then
-			note "[dry-run] would build and install $pkg"
-			continue
-		fi
-
-		note "building $pkg"
-		# makepkg refuses to run as root; if this script was invoked with sudo,
-		# drop back to the invoking user to build, then install as root.
-		if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
-			runuser -u "$SUDO_USER" -- \
-				bash -c "cd '$SRC/packaging/$pkg' && makepkg -f --noconfirm" \
-				|| die "$pkg failed to build"
-			$SUDO pacman -U --noconfirm --needed "$SRC/packaging/$pkg"/*.pkg.tar.zst
-		elif [[ $EUID -eq 0 ]]; then
-			die "run this as your normal user, not root -- makepkg refuses to build as root"
-		else
-			( cd "$SRC/packaging/$pkg" && makepkg -si --noconfirm ) \
-				|| die "$pkg failed to build or install"
-		fi
-		note "installed $pkg"
-	done
-
-	# Load them now rather than waiting for a reboot.
-	run modprobe -r oxpec 2>/dev/null || true
-	run modprobe oxpec 2>/dev/null || warn "oxpec did not load -- check 'dmesg | grep oxpec'"
-	run modprobe ryzen_smu 2>/dev/null || warn "ryzen_smu did not load"
-}
-install_kernel_modules
-
-# --- TDP daemon -------------------------------------------------------------
-say "TDP daemon"
+# --- everything else --------------------------------------------------------
+say "onexplayer-x2mini and its dependencies"
 if [[ "$DRY_RUN" == "1" ]]; then
-	note "[dry-run] would install oxp-tdpd"
+	note "[dry-run] paru -S --needed onexplayer-x2mini"
+	note "          (pulls steamos-manager, inputplumber, oxp-tdpd-bin, oxpec-x2mini-dkms)"
 else
-	"$SRC/tdpd/install-tdpd.sh"
+	paru -S --needed --noconfirm onexplayer-x2mini || die "package install failed.
+    If onexplayer-x2mini is not found, it may not be published yet --
+    build from this checkout instead:  cd packaging/onexplayer-x2mini && makepkg -si"
 fi
 
-# --- input stack ------------------------------------------------------------
-HWDB_LIVE=/etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb
-
-if [[ "$SKIP_INPUT" == "0" ]]; then
-	say "Input stack"
-
-	install_file "$SRC/etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb" "$HWDB_LIVE"
-	run rm -f "$HWDB_LIVE.disabled"
-
-	# Map before profile: the profile references the map by id, and InputPlumber
-	# refuses to build the composite device if that id does not resolve.
-	install_file "$SRC/etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml" \
-	             /etc/inputplumber/capability_maps.d/onexplayer_x2mini.yaml
-	install_file "$SRC/etc/inputplumber/devices.d/50-onexplayer_x2_mini.yaml" \
-	             /etc/inputplumber/devices.d/50-onexplayer_x2_mini.yaml
-else
-	say "Skipping input stack (--skip-input)"
-	if [[ -e "$HWDB_LIVE" ]]; then
-		run mv "$HWDB_LIVE" "$HWDB_LIVE.disabled"
-		note "parked $HWDB_LIVE -> .disabled"
-	fi
-fi
-
-# --- steamos-manager profile ------------------------------------------------
-say "steamos-manager device profile"
-install_file "$SRC/usr/share/steamos-manager/devices/onexplayer-x2-mini.toml" \
-             /usr/share/steamos-manager/devices/onexplayer-x2-mini.toml
-
-# --- udev / hwdb ------------------------------------------------------------
-say "Refreshing udev"
-run systemd-hwdb update
-# udevd caches the compiled hwdb; without this it keeps applying the old data.
-run udevadm control --reload
-
-if [[ "$SKIP_INPUT" == "0" && "$DRY_RUN" == "0" ]]; then
-	hwdb_out="$(systemd-hwdb query "$(cat /sys/class/dmi/id/modalias)" 2>/dev/null || true)"
-	[[ "$hwdb_out" == *USE_INPUTPLUMBER=1* ]] \
-		|| die "hwdb did not pick up USE_INPUTPLUMBER=1 -- check the .hwdb syntax"
-	note "USE_INPUTPLUMBER=1 resolves"
-
-	run udevadm trigger --subsystem-match=dmi --action=add
-	sleep 3
-	run systemctl enable inputplumber-suspend.service
-elif [[ "$SKIP_INPUT" == "1" && "$DRY_RUN" == "0" ]]; then
-	# A Before=sleep.target oneshot aimed at a D-Bus name nobody owns.
-	if systemctl is-enabled --quiet inputplumber-suspend.service 2>/dev/null; then
-		run systemctl disable --now inputplumber-suspend.service
-	fi
-	if systemctl is-active --quiet inputplumber 2>/dev/null; then
-		run systemctl stop inputplumber
-		# InputPlumber chmods its source devices to 000 to hide them and does not
-		# reliably restore them, which leaves the gamepad unusable.
-		note "restoring /dev/input permissions"
-		run udevadm trigger --subsystem-match=input --action=add
-		run udevadm settle
-	fi
-fi
-
-# --- HDR --------------------------------------------------------------------
-# One file. gamescope only advertises HDR for panels present in its
-# known_displays table, and that table is the whole mechanism -- no --hdr-enabled
-# flag and no patched session script, both of which earlier versions of this
-# repo carried unnecessarily. Verified with the stock session on this unit.
-#
-# /etc/gamescope/scripts is scanned after gamescope's bundled directory, so this
-# survives gamescope updates.
-if [[ "$SKIP_HDR" == "0" ]]; then
-	say "HDR"
-	install_file "$SRC/etc/gamescope/scripts/onexplayer.x2mini.oled.lua" \
-	             /etc/gamescope/scripts/onexplayer.x2mini.oled.lua
-	note "takes effect on the next game-mode session"
-else
-	say "Skipping HDR (--skip-hdr)"
-fi
-
-# --- steamos-manager --------------------------------------------------------
-# New D-Bus interfaces are only registered at startup, so a reload is not enough.
-say "Restarting steamos-manager"
+# --- services ---------------------------------------------------------------
+# The packages install units and refresh udev/hwdb in their scriptlets, but
+# deliberately do not start anything. Do that here, since this script is the
+# "and now it works" entry point.
+say "Starting services"
+run systemctl daemon-reload
+run systemctl enable --now oxp-tdpd
+# steamos-manager binds remote D-Bus interfaces at startup, so it has to be
+# restarted to notice a newly registered TdpLimit1 provider -- both daemons.
 run systemctl restart steamos-manager
 if [[ "$DRY_RUN" == "0" ]] && systemctl --user is-active --quiet steamos-manager 2>/dev/null; then
 	systemctl --user restart steamos-manager
 	note "restarted user daemon too"
 fi
+run modprobe -r oxpec 2>/dev/null || true
+run modprobe oxpec 2>/dev/null || warn "oxpec did not load -- check 'dmesg | grep oxpec'"
 [[ "$DRY_RUN" == "0" ]] && sleep 3
-
 # --- kernel parameters: tell, never touch -----------------------------------
 say "Suspend kernel parameters"
 if grep -q 'amd_iommu=off' /proc/cmdline 2>/dev/null; then
