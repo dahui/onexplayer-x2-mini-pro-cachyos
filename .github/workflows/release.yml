@@ -40,6 +40,28 @@ jobs:
             -o "dist/onexplayer-x2-mini-pro-cachyos-${VERSION}.tar.gz" \
             "${GITHUB_REF_NAME}"
 
+      - name: Build DKMS packages
+        # In a container rather than a container-job, so the Go steps above keep
+        # using the normal runner. Both packages are arch=any and ship source
+        # only -- the user's machine compiles the module -- so a package built
+        # here is portable to any Arch install.
+        #
+        # ryzen-smu-x2mini-dkms is shipped here rather than on the AUR because it
+        # forks an existing AUR package and is meant to be deleted once its patch
+        # is upstreamed. The release page keeps it out of that namespace.
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work archlinux:base-devel bash -c '
+            set -euo pipefail
+            pacman -Syu --noconfirm --needed git
+            useradd -m builder
+            chown -R builder /work
+            for p in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
+              runuser -u builder -- bash -c "cd packaging/$p && makepkg -f --nodeps --noconfirm"
+              cp packaging/$p/*.pkg.tar.zst dist/
+            done
+          '
+          ls -la dist/
+
       - name: Checksums
         working-directory: dist
         run: |
@@ -51,6 +73,7 @@ jobs:
         with:
           files: |
             dist/oxp-tdpd
+            dist/*.pkg.tar.zst
             dist/onexplayer-x2-mini-pro-cachyos-*.tar.gz
             dist/SHA256SUMS
           body: |

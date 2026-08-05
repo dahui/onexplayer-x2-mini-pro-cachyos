@@ -25,9 +25,14 @@ DRY_RUN=0
 ONLY=""
 
 # Dependency order, leaves first.
+#
+# ryzen-smu-x2mini-dkms is deliberately ABSENT. It forks an existing AUR package
+# (ryzen_smu-dkms-git) and exists only until our patch is upstreamed. Putting a
+# short-lived fork of someone else's package into the AUR namespace is exactly
+# the thing that quietly becomes permanent, so it ships as a prebuilt package on
+# the GitHub release instead and install.sh builds it from the checkout.
 PACKAGES=(
 	oxpec-x2mini-dkms
-	ryzen-smu-x2mini-dkms
 	oxp-tdpd-bin
 	onexplayer-x2mini
 )
@@ -116,10 +121,14 @@ for pkg in "${PACKAGES[@]}"; do
 		git -C "$aur" remote add origin "ssh://aur@aur.archlinux.org/$pkg.git"
 	fi
 
-	# Copy only what the AUR should carry: the PKGBUILD, .SRCINFO and any
-	# install scriptlet. Never the built packages or src/ trees.
+	# Copy what the AUR repo has to carry: the PKGBUILD, .SRCINFO, any install
+	# scriptlet, and any *local* sources the PKGBUILD names. oxpec-x2mini-dkms
+	# sources oxpec.c/Makefile/dkms.conf from alongside the PKGBUILD rather than
+	# from a tarball, and without them the AUR repo would not build.
+	# Never the built packages, pkg/ or src/ trees.
 	cp PKGBUILD .SRCINFO "$aur/"
-	for extra in "$SRC/$pkg"/*.install; do
+	for extra in "$SRC/$pkg"/*.install "$SRC/$pkg"/*.patch \
+	             "$SRC/$pkg"/*.c "$SRC/$pkg"/Makefile "$SRC/$pkg"/dkms.conf; do
 		[[ -e "$extra" ]] && cp "$extra" "$aur/"
 	done
 

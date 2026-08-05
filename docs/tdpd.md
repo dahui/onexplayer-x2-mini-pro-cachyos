@@ -38,7 +38,7 @@ Steam ──D-Bus──▶ steamos-manager (user daemon)
 ```
 
 Requires the `ryzen_smu` module (amkillam fork) and, for read-back, the PM table
-patch in [`../ryzen-smu/`](../ryzen-smu/). The installer checks both and warns
+patch in [`packaging/ryzen-smu-x2mini-dkms/`](ryzen-smu.md). The installer checks both and warns
 rather than failing if the PM table is missing.
 
 It builds the binary, installs the systemd unit, D-Bus policy and remotes.d

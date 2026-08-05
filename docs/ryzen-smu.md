@@ -147,7 +147,7 @@ All three land exactly where RyzenAdj's documented layout says they should, and
 ## Install
 
 ```bash
-./ryzen-smu/install-patch.sh
+cd packaging/ryzen-smu-x2mini-dkms && makepkg -si
 ```
 
 Idempotent — detects an already-patched tree. Requires `ryzen_smu-dkms-git`
@@ -156,7 +156,7 @@ Idempotent — detects an already-patched tree. Requires `ryzen_smu-dkms-git`
 ### This does not survive package updates
 
 The patch is applied to the AUR package's source in `/usr/src/ryzen_smu-*`, so a
-`ryzen_smu-dkms-git` update reverts it. Re-run `./ryzen-smu/install-patch.sh` afterwards.
+`ryzen_smu-dkms-git` cannot revert it any more: the package carries conflicts=() against it.
 `oxp-tdpd` degrades gracefully if that is forgotten — it logs a warning and
 falls back to cached read-back rather than failing.
 

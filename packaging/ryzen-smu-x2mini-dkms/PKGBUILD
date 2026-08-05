@@ -40,14 +40,17 @@ makedepends=('git')
 # reverting the patch.
 conflicts=('ryzen_smu-dkms-git' 'ryzen_smu-dkms')
 provides=("ryzen_smu-dkms=$_modver")
-source=("$_reponame-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
-        "ryzen_smu::git+https://github.com/$_upstream.git#commit=$_commit")
+# Self-contained: upstream source plus our patch, with no dependency on a
+# published release. That is what lets CI build this package straight from a
+# checkout and attach it to the release, so it never needs to go to the AUR.
+source=("ryzen_smu::git+https://github.com/$_upstream.git#commit=$_commit"
+        "0001-ryzen_smu-add-pm-table-0x64010C.patch")
 sha256sums=('SKIP'
-            'SKIP')
+            'db89ee33aafcbb1f0fd47fce82e7b297cb7a98e678b83c2bab2ca479b3c63fc2')
 
 prepare() {
 	cd "$srcdir/ryzen_smu"
-	patch -p1 -i "$srcdir/$_reponame-$pkgver/ryzen-smu/0001-ryzen_smu-add-pm-table-0x64010C.patch"
+	patch -p1 -i "$srcdir/0001-ryzen_smu-add-pm-table-0x64010C.patch"
 
 	# Fail loudly rather than shipping an unpatched module that would break
 	# ryzenadj in a way nobody would connect back to this package.
@@ -74,8 +77,6 @@ package() {
 		AUTOINSTALL="yes"
 	EOF
 
-	install -Dm644 "$srcdir/$_reponame-$pkgver/LICENSE" \
+	install -Dm644 "$startdir/../../LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-	install -Dm644 "$srcdir/$_reponame-$pkgver/docs/ryzen-smu.md" \
-		"$pkgdir/usr/share/doc/$pkgname/ryzen-smu.md"
 }

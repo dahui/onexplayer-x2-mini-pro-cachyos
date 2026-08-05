@@ -93,7 +93,7 @@ available. That is unfinished business, not something this patch addresses.
 ## Install
 
 ```bash
-./oxpec/install-oxpec.sh
+cd packaging/oxpec-x2mini-dkms && makepkg -si
 ```
 
 Needs `dkms` and kernel headers (both already present). It stages `src/oxpec.c`

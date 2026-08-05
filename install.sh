@@ -101,14 +101,47 @@ install_deps() {
 [[ "$SKIP_DEPS" == "1" ]] && say "Skipping dependencies (--no-deps)" || install_deps
 
 # --- kernel modules ---------------------------------------------------------
-# Both are DKMS, so they rebuild automatically on kernel updates.
-say "Kernel modules"
-if [[ "$DRY_RUN" == "1" ]]; then
-	note "[dry-run] would run oxpec/install-oxpec.sh and ryzen-smu/install-patch.sh"
-else
-	"$SRC/oxpec/install-oxpec.sh"
-	"$SRC/ryzen-smu/install-patch.sh"
-fi
+# Installed as real pacman packages, not staged into /usr/src by hand. That
+# matters for ryzen-smu-x2mini-dkms in particular: it carries
+# conflicts=('ryzen_smu-dkms-git'), which is what stops a ryzen_smu-dkms-git
+# update replacing /usr/src wholesale and silently dropping our PM table patch --
+# leaving a loaded-but-unpatched module that breaks ryzenadj with an error
+# reading like a permissions problem.
+#
+# Both are arch=any and ship source only; DKMS compiles them against the running
+# kernel and rebuilds on kernel updates.
+install_kernel_modules() {
+	say "Kernel modules"
+
+	for pkg in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
+		if [[ "$DRY_RUN" == "1" ]]; then
+			note "[dry-run] would build and install $pkg"
+			continue
+		fi
+
+		note "building $pkg"
+		# makepkg refuses to run as root; if this script was invoked with sudo,
+		# drop back to the invoking user to build, then install as root.
+		if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
+			runuser -u "$SUDO_USER" -- \
+				bash -c "cd '$SRC/packaging/$pkg' && makepkg -f --noconfirm" \
+				|| die "$pkg failed to build"
+			$SUDO pacman -U --noconfirm --needed "$SRC/packaging/$pkg"/*.pkg.tar.zst
+		elif [[ $EUID -eq 0 ]]; then
+			die "run this as your normal user, not root -- makepkg refuses to build as root"
+		else
+			( cd "$SRC/packaging/$pkg" && makepkg -si --noconfirm ) \
+				|| die "$pkg failed to build or install"
+		fi
+		note "installed $pkg"
+	done
+
+	# Load them now rather than waiting for a reboot.
+	run modprobe -r oxpec 2>/dev/null || true
+	run modprobe oxpec 2>/dev/null || warn "oxpec did not load -- check 'dmesg | grep oxpec'"
+	run modprobe ryzen_smu 2>/dev/null || warn "ryzen_smu did not load"
+}
+install_kernel_modules
 
 # --- TDP daemon -------------------------------------------------------------
 say "TDP daemon"

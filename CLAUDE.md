@@ -291,19 +291,24 @@ case 0x70: /* Strix Halo (AI MAX+ 395) */
     g_smu.codename = CODENAME_STRIXHALO;
 ```
 
-Plus the PM table patch in §2.3. The patch lives in `ryzen-smu/` and is
-`git am`-ready for upstreaming — it fixes ryzenadj for everyone on this
+Plus the PM table patch in §2.3. It lives in `packaging/ryzen-smu-x2mini-dkms/`
+and is `git am`-ready for upstreaming — it fixes ryzenadj for everyone on this
 hardware, not just us.
 
-**It is applied to the AUR package's source in `/usr/src`, so a package update
-reverts it.** Re-run `ryzen-smu/install-patch.sh`.
+**It is no longer applied to another package's `/usr/src` tree.** That approach
+was silently reverted by every `ryzen_smu-dkms-git` update, leaving a
+loaded-but-unpatched module. It now ships as `ryzen-smu-x2mini-dkms`, whose
+`conflicts=('ryzen_smu-dkms-git')` makes that collision impossible. Deliberately
+distributed on the GitHub release rather than the AUR: it forks someone else's
+package and should be deleted once the patch is upstreamed.
 
 ### 4.2 oxpec
 
 Ships in-kernel but will not bind: its DMI table matches on **board** name and
 has no X2 Mini entry, so `modprobe oxpec` fails with `ENODEV`. Upstream maps the
 APEX to board type `oxp_fly`; since the board is identical, one table entry with
-the same `driver_data` is the whole fix (`oxpec/`).
+the same `driver_data` is the whole fix
+(`packaging/oxpec-x2mini-dkms/`).
 
 Provides:
 

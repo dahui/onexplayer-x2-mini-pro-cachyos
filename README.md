@@ -63,13 +63,14 @@ cd packaging/onexplayer-x2mini && makepkg -si
 ```
 
 Four packages live in [`packaging/`](packaging/README.md): the configs, the TDP
-daemon, and the two DKMS modules. `ryzen-smu-x2mini-dkms` deliberately conflicts
-with `ryzen_smu-dkms-git` — that is what stops a package update silently
-reverting the PM table patch and breaking ryzenadj.
+daemon, and the two DKMS modules. `install.sh` already builds and installs the
+two kernel modules this way, so they are pacman-managed either way.
 
-Not on the AUR yet; [`packaging/README.md`](packaging/README.md) covers the
-setup and the publishing chain. `ryzen-smu-x2mini-dkms` is temporary and should
-be deleted once its patch is upstreamed.
+`ryzen-smu-x2mini-dkms` deliberately conflicts with `ryzen_smu-dkms-git` — that
+is what stops a package update silently reverting the PM table patch and
+breaking ryzenadj. It is distributed only on the GitHub release page, never the
+AUR: it forks someone else's package and is meant to disappear once the patch is
+upstreamed. [`packaging/README.md`](packaging/README.md) covers the rest.
 </details>
 
 ## Suspend needs a kernel parameter, and it costs the NPU
@@ -176,7 +177,7 @@ dead ends here look correct on paper and cost real debugging time.
 
 GPL-2.0. Two parts have their own history:
 
-- `oxpec/src/oxpec.c` is a derived work of the OneXPlayer EC driver by
+- `packaging/oxpec-x2mini-dkms/oxpec.c` is a derived work of the OneXPlayer EC driver by
   **Joaquín I. Aramendía**, GPL-2.0-or-later, and keeps its own SPDX header.
 - `tdpd/internal/smu/` originated in [z13ctl](https://github.com/dahui/z13ctl)
   (Apache-2.0, same author) and is relicensed GPL-2.0 here.
