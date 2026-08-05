@@ -131,18 +131,29 @@ fi
 install_ryzen_smu() {
 	say "ryzen-smu-x2mini-dkms (from the releases page)"
 
-	local tag="$TAG"
-	if [[ "$tag" == "latest" ]]; then
-		tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-			| sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
-		[[ -n "$tag" ]] || die "could not determine the latest release tag.
+	local api="https://api.github.com/repos/$REPO/releases/latest"
+	[[ "$TAG" != "latest" ]] && api="https://api.github.com/repos/$REPO/releases/tags/$TAG"
+
+	local rel tag url pkg base
+	rel="$(curl -fsSL "$api")" || die "could not query release '$TAG' of $REPO.
     The repository may have no releases yet."
-	fi
-	local pkg="ryzen-smu-x2mini-dkms-${tag#v}-1-any.pkg.tar.zst"
-	local base="https://github.com/$REPO/releases/download/$tag"
+	tag="$(printf '%s' "$rel" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+
+	# Take the asset URL the release actually advertises rather than
+	# reconstructing the filename. pkgrel is not always 1 -- a rebuild at the
+	# same pkgver bumps it to -2- -- and a guessed filename would simply 404.
+	url="$(printf '%s' "$rel" \
+		| grep -oE '"browser_download_url": *"[^"]*ryzen-smu-x2mini-dkms[^"]*\.pkg\.tar\.zst"' \
+		| sed 's/.*"\(https[^"]*\)"/\1/' | head -1)"
+	[[ -n "$url" ]] || die "release $tag has no ryzen-smu-x2mini-dkms package attached.
+    Build it from a clone instead: packaging/ryzen-smu-x2mini-dkms"
+
+	pkg="$(basename "$url")"
+	base="https://github.com/$REPO/releases/download/$tag"
 
 	if [[ "$DRY_RUN" == "1" ]]; then
-		note "[dry-run] download $base/$pkg, verify, pacman -U"
+		note "$tag -> $pkg"
+		note "[dry-run] download, verify against SHA256SUMS, pacman -U"
 		return 0
 	fi
 
@@ -152,7 +163,7 @@ install_ryzen_smu() {
 	trap "rm -rf '$tmp'" RETURN
 
 	note "$tag"
-	curl -fsSL -o "$tmp/$pkg" "$base/$pkg" \
+	curl -fsSL -o "$tmp/$pkg" "$url" \
 		|| die "could not download $pkg from release $tag"
 
 	# The package is installed with pacman -U straight off the internet, so the
