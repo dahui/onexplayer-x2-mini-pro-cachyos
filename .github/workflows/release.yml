@@ -3,6 +3,17 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # A tag push is a one-shot event: if GitHub never queues it, nothing replays
+  # it, and the only recovery is deleting and re-pushing the tag. That happened
+  # to v0.1.3, lost to the Actions outage of 2026-08-06. Dispatch re-runs a
+  # release without touching the tag.
+  #
+  # Point it at the tag, never a branch:
+  #     gh workflow run release.yml --ref v0.1.3
+  #
+  # Note the file must carry this trigger *at the ref being dispatched*, so it
+  # cannot rescue a tag cut before this change -- those still need a re-push.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,6 +22,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Require a v* tag ref
+        # Every step below derives the version from GITHUB_REF_NAME. Dispatched
+        # against a branch that yields "main", so the run would stamp
+        # pkgver=main into every PKGBUILD, build a matching tarball, and publish
+        # the lot as a release named "main". The push trigger already filters to
+        # v* tags, so this only ever fires on a mis-aimed dispatch.
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "::error::Release must run against a v* tag, got ${GITHUB_REF}." \
+               "Use: gh workflow run release.yml --ref vX.Y.Z"
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
