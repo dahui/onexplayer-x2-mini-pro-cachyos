@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
 
@@ -101,10 +102,19 @@ func run(status bool, set uint32, cfgPath string, recapture bool) error {
 	}
 
 	if set != 0 {
-		return ctl.Apply(set)
+		// Forced: a fresh process has no cache describing the hardware, so
+		// there is nothing to safely skip. Note this path does not coordinate
+		// with a running daemon — smu's mutex is process-local. An advisory
+		// lock on the driver directory would fix that; it always raced, and
+		// this change neither improves nor worsens it.
+		return ctl.ApplyForce(set)
 	}
 
-	svc, err := dbusiface.Export(ctl)
+	// Coalesce the stream of Sets Steam emits while its slider moves. Applying
+	// each one inline is what let a TDP change during a game freeze the system.
+	com := tdp.NewCommitter(ctl)
+
+	svc, err := dbusiface.Export(ctl, com)
 	if err != nil {
 		return err
 	}
@@ -123,6 +133,24 @@ func run(status bool, set uint32, cfgPath string, recapture bool) error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	s := <-sigs
 	slog.Info("shutting down", "signal", s.String())
+
+	if _, err := daemon.SdNotify(false, daemon.SdNotifyStopping); err != nil {
+		slog.Debug("sd_notify stopping failed", "err", err)
+	}
+
+	// Flush a value the user chose but that has not settled yet — Steam is
+	// already showing it, so dropping it leaves that display wrong. This is not
+	// the same as restoring limits on exit, which we still deliberately do not
+	// do (see below).
+	//
+	// The timeout bounds how long we wait, not how long the write takes: a
+	// goroutine stuck in an uninterruptible write() to the ryzen_smu mailbox
+	// cannot be cancelled from Go, and process exit will still wait on it.
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if err := com.Close(stopCtx); err != nil {
+		slog.Warn("could not flush the pending TDP limit before exit", "err", err)
+	}
 
 	// Deliberately not restoring anything on exit. The firmware reapplies its
 	// own limits at boot, and resetting here would override a limit the user

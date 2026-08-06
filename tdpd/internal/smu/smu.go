@@ -16,6 +16,7 @@ package smu
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -50,7 +51,20 @@ var (
 // mu serializes command sequences. The ryzen_smu driver shares a single
 // argument buffer across all mailboxes, so concurrent commands would corrupt
 // each other's arguments.
+//
+// It also covers the PM table reads in pmtable.go, which look like plain file
+// reads but are not: pm_table_show calls smu_read_pm_table, which issues an
+// RSMU TransferTableSmu2Dram command (rate-limited to 1 ms inside the driver).
+// The driver stores every mailbox's response in one global, g_driver.smu_rsp,
+// so a concurrent read could hand Send somebody else's response code. Until the
+// daemon grew a background committer this was serialized by accident, one layer
+// up; it is now serialized on purpose.
 var mu sync.Mutex
+
+// ErrBusy reports SMU response 0xFC. It is the only response code worth
+// retrying: the firmware was mid-command and the request never took effect.
+// Rejected (0xFD) and unknown-command (0xFE) are semantic and would fail again.
+var ErrBusy = errors.New("SMU busy (0xFC)")
 
 // Available reports whether the ryzen_smu module is loaded and reachable.
 func Available() bool {
@@ -69,7 +83,12 @@ func Available() bool {
 func Send(mailbox string, cmdID uint32, args [6]uint32) (uint32, [6]uint32, error) {
 	mu.Lock()
 	defer mu.Unlock()
+	return sendLocked(mailbox, cmdID, args)
+}
 
+// sendLocked is Send's body, split out so callers already holding mu can reuse
+// it without deadlocking on a non-reentrant mutex.
+func sendLocked(mailbox string, cmdID uint32, args [6]uint32) (uint32, [6]uint32, error) {
 	argsPath := DriverPath + "/smu_args"
 	cmdPath := DriverPath + "/" + mailbox
 
@@ -122,7 +141,7 @@ func ResponseError(code uint32) error {
 	case ReturnRejected:
 		return fmt.Errorf("SMU command rejected (0xFD)")
 	case ReturnBusy:
-		return fmt.Errorf("SMU busy (0xFC)")
+		return fmt.Errorf("%w", ErrBusy)
 	default:
 		return fmt.Errorf("SMU unexpected response: 0x%X", code)
 	}

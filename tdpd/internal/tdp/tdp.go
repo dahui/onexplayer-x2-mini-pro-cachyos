@@ -6,11 +6,14 @@ package tdp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/config"
 	"github.com/dahui/onexplayer-x2-mini-pro-cachyos/tdpd/internal/smu"
@@ -53,10 +56,32 @@ type firmwareDefaults struct {
 	SlowWatts uint32 `json:"slow_watts"`
 }
 
+// limits is one complete set of power limits, in watts.
+type limits struct {
+	stapm, fast, slow uint32
+}
+
+// known records which entries of a limits are trustworthy. Tracked per limit,
+// not per set: after a partial failure some limits are known and some are not,
+// and treating the whole set as unknown would re-send the ones that landed.
+type known struct {
+	stapm, fast, slow bool
+}
+
 // Controller applies power limits according to the configured policy.
 type Controller struct {
 	policy     config.Policy
 	hasPMTable bool
+
+	// send issues one limit-setting message. Indirected so tests can drive
+	// Apply without an SMU, matching the readFile/writeFile precedent in
+	// internal/smu.
+	send func(mailbox string, msg, watts uint32) error
+
+	// mu guards everything below it. The daemon applies limits from a
+	// background committer goroutine, so the Controller can no longer borrow
+	// the D-Bus service's lock the way it used to.
+	mu sync.Mutex
 
 	// defaults is the firmware's fast/slow, captured once and persisted. The
 	// SMU has no "restore firmware default" message, so once fast/slow have
@@ -65,6 +90,12 @@ type Controller struct {
 	defaults     firmwareDefaults
 	haveDefaults bool
 	defaultsPath string
+
+	// applied records what each limit was last *successfully* set to, so an
+	// unchanged limit is not re-sent and a limit whose write failed is retried
+	// on the next apply rather than being assumed good.
+	applied limits
+	known   known
 
 	lastApplied uint32
 }
@@ -81,6 +112,7 @@ func New(policy config.Policy, stateDir string) (*Controller, error) {
 		policy:       policy,
 		hasPMTable:   smu.PMTableAvailable(),
 		defaultsPath: filepath.Join(stateDir, "firmware-defaults.json"),
+		send:         smuSend,
 	}
 
 	if c.hasPMTable {
@@ -162,6 +194,9 @@ func (c *Controller) saveDefaults() error {
 // RecaptureDefaults forces a fresh capture, for use after a firmware update.
 // Only safe when the current fast/slow really are the firmware's.
 func (c *Controller) RecaptureDefaults() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.hasPMTable {
 		return fmt.Errorf("cannot recapture without the PM table")
 	}
@@ -174,79 +209,161 @@ func (c *Controller) RecaptureDefaults() error {
 	return nil
 }
 
-// send issues one limit-setting message.
-func send(msg uint32, watts uint32) error {
-	_, err := smu.SendChecked(smu.MailboxMP1, msg, [6]uint32{watts * 1000})
+// busyRetryDelays is the backoff between attempts when the SMU answers 0xFC.
+// Three attempts inside 35 ms, which is affordable now that limits are applied
+// from a background goroutine rather than inline on a D-Bus method reply.
+var busyRetryDelays = []time.Duration{10 * time.Millisecond, 25 * time.Millisecond}
+
+// smuSend issues one limit-setting message, retrying a busy SMU.
+func smuSend(mailbox string, msg, watts uint32) error {
+	return retryBusy(rawSend, mailbox, msg, watts)
+}
+
+func rawSend(mailbox string, msg, watts uint32) error {
+	_, err := smu.SendChecked(mailbox, msg, [6]uint32{watts * 1000})
 	return err
 }
 
-// Apply sets the power limits for the given slider value in watts.
-func (c *Controller) Apply(watts uint32) error {
+// retryBusy re-issues a command the SMU answered 0xFC to. Only 0xFC: rejected
+// and unknown-command are semantic and would fail identically on a retry.
+func retryBusy(send func(mailbox string, msg, watts uint32) error,
+	mailbox string, msg, watts uint32,
+) error {
+	for attempt := 0; ; attempt++ {
+		err := send(mailbox, msg, watts)
+		if !errors.Is(err, smu.ErrBusy) || attempt >= len(busyRetryDelays) {
+			return err
+		}
+		slog.Debug("SMU busy, retrying", "mailbox", mailbox,
+			"msg", fmt.Sprintf("0x%X", msg), "attempt", attempt+1)
+		time.Sleep(busyRetryDelays[attempt])
+	}
+}
+
+// Apply sets the power limits for the given slider value in watts, skipping
+// any limit already known to hold that value.
+func (c *Controller) Apply(watts uint32) error { return c.apply(watts, false) }
+
+// ApplyForce is Apply without the skip, for cases where the cache cannot be
+// trusted to describe the hardware: the --set one-shot, and resume, where the
+// firmware has silently reverted to its own limits behind our back.
+func (c *Controller) ApplyForce(watts uint32) error { return c.apply(watts, true) }
+
+func (c *Controller) apply(watts uint32, force bool) error {
 	if watts < MinWatts || watts > MaxWatts {
 		return fmt.Errorf("%d W out of range %d-%d", watts, MinWatts, MaxWatts)
 	}
 
-	// STAPM first in every policy: it is the limit that always applies, so if a
-	// later write fails we have still lowered the sustained ceiling rather than
-	// raised the burst one.
-	if err := c.applyStapm(watts); err != nil {
-		return err
-	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	var fast, slow uint32
+	want := limits{stapm: watts}
 	switch c.policy {
 	case config.PolicyAll:
-		fast, slow = watts, watts
+		want.fast, want.slow = watts, watts
 
 	case config.PolicyHeadroom:
-		slow = watts
-		fast = watts * headroomNumer / headroomDenom
-		if fast > MaxWatts {
-			fast = MaxWatts
+		want.slow = watts
+		want.fast = watts * headroomNumer / headroomDenom
+		if want.fast > MaxWatts {
+			want.fast = MaxWatts
 		}
 
 	case config.PolicyStapm:
 		if !c.haveDefaults {
 			// Nothing to restore to, so leave fast/slow alone. On a clean boot
 			// they are still the firmware's, which is the intent anyway.
+			sent, err := c.sendLimit(&c.applied.stapm, &c.known.stapm,
+				want.stapm, force, msgSetStapmLimit)
+			if err != nil {
+				return err
+			}
 			c.lastApplied = watts
+			if !sent {
+				slog.Debug("TDP limit unchanged, not touching the SMU",
+					"watts", watts, "policy", c.policy)
+				return nil
+			}
 			slog.Info("applied TDP limit", "watts", watts, "policy", c.policy)
 			return nil
 		}
-		fast, slow = c.defaults.FastWatts, c.defaults.SlowWatts
+		want.fast, want.slow = c.defaults.FastWatts, c.defaults.SlowWatts
 
 	default:
 		return fmt.Errorf("unknown policy %q", c.policy)
 	}
 
-	if err := send(msgSetFastLimit, fast); err != nil {
-		return fmt.Errorf("setting fast limit to %d W: %w", fast, err)
+	// STAPM first in every policy: it is the limit that always applies, so if a
+	// later write fails we have still lowered the sustained ceiling rather than
+	// raised the burst one.
+	sentStapm, err := c.sendLimit(&c.applied.stapm, &c.known.stapm,
+		want.stapm, force, msgSetStapmLimit)
+	if err != nil {
+		return err
 	}
-	if err := send(msgSetSlowLimit, slow); err != nil {
-		return fmt.Errorf("setting slow limit to %d W: %w", slow, err)
+	sentFast, err := c.sendLimit(&c.applied.fast, &c.known.fast,
+		want.fast, force, msgSetFastLimit)
+	if err != nil {
+		return fmt.Errorf("setting fast limit to %d W: %w", want.fast, err)
+	}
+	sentSlow, err := c.sendLimit(&c.applied.slow, &c.known.slow,
+		want.slow, force, msgSetSlowLimit)
+	if err != nil {
+		return fmt.Errorf("setting slow limit to %d W: %w", want.slow, err)
 	}
 
 	c.lastApplied = watts
+	if !sentStapm && !sentFast && !sentSlow {
+		slog.Debug("TDP limit unchanged, not touching the SMU",
+			"watts", watts, "policy", c.policy)
+		return nil
+	}
 	slog.Info("applied TDP limit", "watts", watts, "policy", c.policy,
-		"fast_w", fast, "slow_w", slow)
+		"fast_w", want.fast, "slow_w", want.slow)
 	return nil
 }
 
-func (c *Controller) applyStapm(watts uint32) error {
-	err := send(msgSetStapmLimit, watts)
+// sendLimit writes one limit unless that limit is already known to hold the
+// value, and records it only once the SMU has accepted the write. A limit whose
+// write fails therefore stays marked unknown and is retried next time, instead
+// of being assumed good because some other limit in the same apply failed.
+//
+// Reports whether anything was actually sent.
+func (c *Controller) sendLimit(have *uint32, ok *bool, want uint32, force bool, msg uint32) (bool, error) {
+	if !force && *ok && *have == want {
+		return false, nil
+	}
+	var err error
+	if msg == msgSetStapmLimit {
+		err = c.sendStapm(want)
+	} else {
+		err = c.send(smu.MailboxMP1, msg, want)
+	}
+	if err != nil {
+		return false, err
+	}
+	*have, *ok = want, true
+	return true, nil
+}
+
+func (c *Controller) sendStapm(watts uint32) error {
+	err := c.send(smu.MailboxMP1, msgSetStapmLimit, watts)
 	if err == nil {
 		return nil
 	}
 	// Mirror RyzenAdj: retry on the PSMU mailbox before giving up.
 	slog.Warn("STAPM via MP1 failed, retrying on PSMU", "err", err)
-	if _, perr := smu.SendChecked(smu.MailboxRSMU, msgSetStapmLimitPSMU,
-		[6]uint32{watts * 1000}); perr != nil {
+	if perr := c.send(smu.MailboxRSMU, msgSetStapmLimitPSMU, watts); perr != nil {
 		return fmt.Errorf("setting STAPM limit: MP1: %w; PSMU: %v", err, perr)
 	}
 	return nil
 }
 
 // Current returns the sustained limit the SMU is enforcing, in watts.
+//
+// This reads the PM table, which is an SMU mailbox command inside the driver,
+// not a cheap file read. Keep it off hot paths, and never call it to find out
+// what happened after a mailbox command has just failed — use LastApplied.
 func (c *Controller) Current() uint32 {
 	if c.hasPMTable {
 		if l, err := smu.ReadLimits(); err == nil {
@@ -266,20 +383,35 @@ func (c *Controller) Current() uint32 {
 			slog.Warn("PM table read failed, falling back to the cached value", "err", err)
 		}
 	}
-	if c.lastApplied == 0 {
-		return MinWatts
+	if w := c.LastApplied(); w != 0 {
+		return w
 	}
+	return MinWatts
+}
+
+// LastApplied returns the last value applied successfully, or 0 if none has
+// been. Unlike Current it reads only the cache, so it is safe to call after a
+// failed SMU command — which is exactly when reaching for the hardware again is
+// the worst available move.
+func (c *Controller) LastApplied() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.lastApplied
 }
 
 // Reapply re-sends the last applied limit, for use after resume — SMU limits do
 // not survive a suspend cycle. No-op if nothing has been applied yet, so a
 // resume before Steam ever set a value leaves the firmware alone.
+//
+// Forced, and that is load-bearing: after a resume the hardware is back at the
+// firmware's limits while our cache still says otherwise, so a deduplicating
+// Reapply would skip every write and silently do nothing.
 func (c *Controller) Reapply() error {
-	if c.lastApplied == 0 {
+	w := c.LastApplied()
+	if w == 0 {
 		return nil
 	}
-	return c.Apply(c.lastApplied)
+	return c.ApplyForce(w)
 }
 
 // Policy reports the active policy.

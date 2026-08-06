@@ -127,17 +127,45 @@ PPT slow              47.0W     7.7W
 
 ## Behaviour notes
 
-- **Read-back is real.** `TdpLimit` comes from the PM table, not a cache, so it
-  stays honest if something else moves the limit. It falls back to the last
-  applied value only if the table is unavailable.
+- **Changes are committed once the slider settles, not while it moves.** Steam
+  emits a burst of property writes as the user drags — five for a *single*
+  value inside 10 ms was measured on this machine, and a full drag can produce
+  ~75 more. Applying each one inline is what made changing TDP during a game
+  able to freeze the system: every SMU command races amdgpu for the same
+  mailbox, with no arbitration between them, and losing that race can wedge the
+  SMU for the rest of the boot (`amdgpu: SMU: No response msg_reg: f resp_reg:
+  0` in the kernel log is the signature).
+
+  So the daemon coalesces: 250 ms after the last request, at most 1 s after the
+  first of a continuous drag, and never more often than every 150 ms. A limit
+  already known to hold the requested value is not written at all. These are
+  hardcoded in `internal/tdp/commit.go` and deliberately not configurable — a
+  settle time of zero restores the behaviour they exist to prevent.
+- **A `Set` is answered before it reaches hardware.** The D-Bus reply says
+  "accepted and queued", not "applied". Blocking the reply on the SMU is the
+  coupling that propagates a stalled mailbox out to steamos-manager and then
+  Steam's UI; godbus also holds its properties lock across the callback, so it
+  would stall every `Get` on the object too. Range errors are still returned
+  synchronously. A commit that later fails is reported by correcting the
+  property — Steam listens for `PropertiesChanged` — and in the journal.
+- **Read-back is a cache, not the hardware.** `TdpLimit` returns the last value
+  requested over D-Bus. godbus's `prop` package serves `Get` from its stored
+  value, and the daemon consults the PM table only at startup and after resume,
+  so an external change (`ryzenadj`, `oxp-tdpd --set`) will not show up there.
+  Use `oxp-tdpd --status` for the real hardware state. Reading the PM table is
+  itself an SMU mailbox command inside the driver, not a cheap file read, which
+  is why it is not done per request.
 - **Reapply after resume is written but UNVERIFIED.** SMU limits do not survive
   a power transition, so the daemon watches logind's `PrepareForSleep` and
   re-sends the last applied limit on wake. That code has never actually run:
   suspend hangs this machine hard — see [suspend.md](suspend.md). Do not
   assume this path works.
-- **Nothing is restored on exit.** Stopping the daemon leaves the current limit
-  in place; the firmware reapplies its own at boot. Resetting on shutdown would
-  override a limit the user deliberately chose.
+- **Nothing is restored on exit**, but a pending value is flushed. Stopping the
+  daemon leaves the current limit in place; the firmware reapplies its own at
+  boot. Resetting on shutdown would override a limit the user deliberately
+  chose. A value that was requested but has not settled yet *is* committed on
+  the way out, bounded at 2 s — Steam is already displaying it, so dropping it
+  would leave that display silently wrong.
 
 ## Layout
 
@@ -147,6 +175,7 @@ PPT slow              47.0W     7.7W
 | `internal/smu/smu.go` | ryzen_smu mailbox transport, adapted from [z13ctl](https://github.com/dahui/z13ctl) (Apache-2.0) |
 | `internal/smu/pmtable.go` | PM table read and layout |
 | `internal/tdp/tdp.go` | apply/read policy, message IDs, range |
+| `internal/tdp/commit.go` | debounce: coalesces a slider drag into one commit |
 | `internal/dbusiface/` | `TdpLimit1` interface and resume watcher |
 | `contrib/` | systemd unit, D-Bus policy, remotes.d registration |
 
