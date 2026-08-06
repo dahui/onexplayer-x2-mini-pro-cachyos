@@ -49,6 +49,9 @@ func PMTableAvailable() bool {
 
 // PMTableVersion returns the firmware's PM table version.
 func PMTableVersion() (uint32, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	b, err := readFile(DriverPath + "/pm_table_version")
 	if err != nil {
 		return 0, fmt.Errorf("reading pm_table_version: %w", err)
@@ -63,8 +66,15 @@ func PMTableVersion() (uint32, error) {
 //
 // The driver refreshes the table from the SMU on read (rate-limited to 1 ms
 // internally), so no explicit transfer command is needed here.
+//
+// That refresh is a real mailbox command, not a cheap read — it takes mu for
+// the same reason Send does, and it costs about as much. Do not call this on a
+// hot path, and never to report that a mailbox command has just failed.
 func ReadLimits() (Limits, error) {
 	var l Limits
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	b, err := readFile(DriverPath + "/pm_table")
 	if err != nil {

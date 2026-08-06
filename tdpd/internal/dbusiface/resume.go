@@ -53,13 +53,11 @@ func (s *Service) WatchResume(ctx context.Context) {
 			}
 
 			slog.Info("system resumed, reapplying TDP limit")
-			s.mu.Lock()
-			err := s.ctl.Reapply()
-			s.mu.Unlock()
-			if err != nil {
+			if err := s.com.Reapply(ctx); err != nil {
 				slog.Error("failed to reapply TDP after resume", "err", err)
+				continue // leave the exported value alone; we know nothing new
 			}
-			s.Sync()
+			s.syncTo(s.ctl.LastApplied())
 		}
 	}
 }
