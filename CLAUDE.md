@@ -19,7 +19,7 @@ than measured it says so.
 | CPUID | family `0x1A` (26), model `0x70` (112), stepping 0 |
 | GPU PCI ID | `1002:1586` |
 | Panel | Samsung `AMS881KB01-0` OLED, 1920x1200@144, 12 bpc |
-| Kernel tested | `7.1.6-1-cachyos-deckify` |
+| Kernel tested | `7.1.6-1-cachyos-deckify`; controller re-measured on `7.2.3-1-cachyos-deckify` |
 
 DMI modalias:
 
@@ -39,10 +39,10 @@ paths to what this unit enumerates, and `oxpec` works with the APEX's board type
 reusing the EC driver and USB topology; it does not transfer the button mapping.
 The button controller differs from the APEX despite the shared board — see §7.
 
-**The panel is the same as the Lenovo Legion Go 2.** Useful for display work,
-but note gamescope 3.16 has no entry for the Go 2 either — its bundled
-`lenovo.legiongo*.lua` scripts cover the LCD models only and declare
-`supported = false`.
+**The panel is the same as the Lenovo Legion Go 2.** That now pays off
+directly: gamescope 3.16.30 ships `lenovo.legiongo2.oled.lua`, which matches this
+panel's EDID and gives it HDR with no help from us (§5). Earlier 3.16 releases
+had no Go 2 entry.
 
 ---
 
@@ -120,7 +120,12 @@ Verified: writing 31000/53000/47000 mW via `0x14`/`0x15`/`0x16` produced
 
 ### 2.3 PM table — this firmware needed reverse engineering
 
-**The firmware reports PM table version `0x64010C`, which ryzen_smu does not
+**Now upstream:** merged verbatim as amkillam/ryzen_smu `b098884`
+(2026-08-15), so `ryzen_smu-dkms-git` handles this firmware as-is. The rest of
+this section is how it was found and validated, which applies again if a
+firmware update changes the version.
+
+**The firmware reports PM table version `0x64010C`, which ryzen_smu did not
 know.** Without a patch:
 
 ```
@@ -291,24 +296,37 @@ case 0x70: /* Strix Halo (AI MAX+ 395) */
     g_smu.codename = CODENAME_STRIXHALO;
 ```
 
-Plus the PM table patch in §2.3. It lives in `packaging/ryzen-smu-x2mini-dkms/`
-and is `git am`-ready for upstreaming — it fixes ryzenadj for everyone on this
-hardware, not just us.
+The PM table patch in §2.3 is upstream (`b098884`), and HEAD also carries
+`d298366`, the Linux 7.2 build fix (`cpuid_eax` moved to `asm/cpuid/api.h`).
+Install `ryzen_smu-dkms-git` (AUR; `provides=('ryzen_smu' 'ryzen_smu-dkms')`).
+It is not in the CachyOS repos.
 
-**It is no longer applied to another package's `/usr/src` tree.** That approach
-was silently reverted by every `ryzen_smu-dkms-git` update, leaving a
-loaded-but-unpatched module. It now ships as `ryzen-smu-x2mini-dkms`, whose
-`conflicts=('ryzen_smu-dkms-git')` makes that collision impossible. Deliberately
-distributed on the GitHub release rather than the AUR: it forks someone else's
-package and should be deleted once the patch is upstreamed.
+**The patched fork this repo shipped, `ryzen-smu-x2mini-dkms`, is gone.** It
+pinned `1be4fb1`, from before the 7.2 fix, so on 7.2 it **fails to build**
+(`modpost: "cpuid_eax" undefined`, upstream issue #51). `install.sh` removes it
+if present.
+
+**oxp-tdpd hard-requires it.** Its only SMU transport is this module's sysfs
+mailbox, for writes as well as read-back, so `oxp-tdpd-bin` has
+`depends=('ryzen_smu-dkms')`. An earlier claim that "TDP control works without
+it" was about ryzenadj, not oxp-tdpd. The module autoloads through its PCI table
+(`drv.c`, root complex `1022:1507`). `oxp-tdpd-bin` also lists it in
+`modules-load.d` and orders the unit after `systemd-modules-load.service`,
+because the unit's `ConditionPathExists` is evaluated once, and a late udev load
+would skip the daemon for the whole boot.
 
 ### 4.2 oxpec
 
-Ships in-kernel but will not bind: its DMI table matches on **board** name and
-has no X2 Mini entry, so `modprobe oxpec` fails with `ENODEV`. Upstream maps the
-APEX to board type `oxp_fly`; since the board is identical, one table entry with
-the same `driver_data` is the whole fix
-(`packaging/oxpec-x2mini-dkms/`).
+Ships in-kernel but will not bind before 7.3: its DMI table matches on **board**
+name and has no X2 Mini entry, so `modprobe oxpec` fails with `ENODEV`. Upstream
+maps the APEX to board type `oxp_fly`; since the board is identical, one table
+entry with the same `driver_data` is the whole fix.
+
+**Upstream from 7.3:** merged as mainline `1b3c0028`, first in v7.3-rc1, and not
+backported to 7.2.y. Until then `packaging/oxpec-x2mini-dkms/` ships v7.2's
+`oxpec.c` plus exactly that hunk (every API matches the 7.2.3 headers). Its
+`dkms.conf` sets `BUILD_EXCLUSIVE_KERNEL` to kernels before 7.3, so from 7.3 the
+DKMS copy is not built and does not shadow the in-tree driver from `/updates`.
 
 Provides:
 
@@ -361,7 +379,20 @@ advertises HDR for panels it recognises. It keeps
 with no entry gets no HDR. Custom entries go in `/etc/gamescope/scripts/`, which
 is scanned afterwards and survives package updates.
 
-Our entry matches on EDID vendor `SDC` and product `0x4301`.
+**That entry is now upstream.** gamescope 3.16.30's bundled
+`lenovo.legiongo2.oled.lua` matches EDID vendor `SDC`, product `0x4301` (this
+panel) at priority 5000. Verified on a fresh install with nothing of ours
+present: `drm: Got known display: lenovo_legiongo2_oled (Lenovo Legion Go 2
+OLED)`. It reads luminance and colorimetry from the EDID, and it sets
+`software_backlight` because the panel ignores hardware backlight in PQ mode.
+It also adds 48–144 Hz dynamic refresh; its 144 Hz vfp of 56 matches this
+panel's EDID timing.
+
+Our own script (`oxp_x2mini_oled`, same match, same priority) was **removed**. A
+tie at 5000 against the same EDID left the winner to chance. Do not re-add a
+custom entry unless it scores higher and there is a measured reason.
+HDR engagement in a real title has not yet been re-confirmed with the upstream
+entry.
 
 **`--hdr-enabled` is NOT required**, despite most guides implying otherwise, and
 an earlier version of this document wrongly called it necessary. Verified with
@@ -375,7 +406,7 @@ OLED works with an unmodified session script — the same script that ships here
 `supported`, `eotf`, and the three luminance values; the string is not in the
 binary. Several bundled entries set it anyway. Do not copy it.
 
-Confirmed working on Like a Dragon: Infinite Wealth:
+Confirmed working on Like a Dragon: Infinite Wealth (with our former entry):
 
 ```
 drm: Got known display: oxp_x2mini_oled (AMS881KB01-0 OLED)
@@ -444,7 +475,7 @@ neighbours.
 | OneXPlayer | `KeyLeftCtrl`+`KeyLeftMeta`+`KeyLeftAlt` | `QuickAccess` (QAM) ✅ |
 | Keyboard | `KeyLeftCtrl`+`KeyLeftMeta`+`KeyO` | `Keyboard` → Steam+X ✅ |
 | Home | vendor HID B2 frame, btn `0x24` | Steam+X via stock profile ✅ |
-| Back paddles | **nothing on any interface** | nothing — see below |
+| Back paddles | 7.1: **nothing on any interface**. 7.2: B2 `0x22` (L) / `0x23` (R), with the watcher | `LeftPaddle1`/`RightPaddle1` (L4/R4) via `oxp_hid` ✅ — see below |
 
 **The chords are fixed-length pulses.** The firmware taps the final key of each
 chord for ~10 ms regardless of how long the button is physically held —
@@ -475,7 +506,7 @@ places at Home. InputPlumber's enum calls `0x24` `Keyboard` because it was
 written for the OXP X1 — a misnomer here, confirmed by marker bracketing, not a
 bug to "fix".
 
-**The paddles require full-intercept mode**, and it is a bad trade today:
+**On 7.1 the paddles required full-intercept mode**, a bad trade:
 
 ```
 enable:   B2 3F 01 03 01 02 00...00 3F B2
@@ -485,21 +516,58 @@ disable:  B2 3F 01 00 01 02 00...00 3F B2
 It makes the paddles report `0x22`/`0x23` **and silences the X-Box gamepad
 completely** — sticks, triggers, d-pad and face buttons all have to be
 reconstructed from vendor HID. There is no mode giving paddles *and* XInput.
-InputPlumber 0.78's `oxp_hid` handles only four button ids and no axes. The
-proper fix is **`hid-oxp`, a Valve-authored driver merged for Linux 7.2**.
-
-**Availability, as of 2026-08-04: 7.2 has not shipped in CachyOS.** This unit
-runs `7.1.6-1-cachyos-deckify`, and a beta or mainline kernel is deliberately
-not a prerequisite for anything in this repo — the paddles wait for 7.2 to reach
-the normal repos. Check `uname -r` before assuming this section is stale.
+On Linux 7.2 they work without that trade, through hid-oxp's button map plus
+a workaround for its init order. See the next section.
 
 Protocol credit: `github.com/rmckayfleming/onexplayer-apex-cachyos`.
 
-### hid-oxp is in mainline, and it documents this protocol officially
+### hid-oxp (Linux 7.2): what it fixes, what it does not
 
-`drivers/hid/hid-oxp.c` is now in Linus's tree (maintainer Derek J. Clark,
-`linux-input@vger.kernel.org`). Two things follow, both checked against the
-mainline source rather than assumed.
+`drivers/hid/hid-oxp.c` shipped in 7.2 (maintainer Derek J. Clark,
+`linux-input@vger.kernel.org`) and binds this controller on
+`7.2.3-1-cachyos-deckify`. Full measurements are in `docs/controller.md`. Every
+claim below comes from raw HID reports in
+`/sys/kernel/debug/hid/0003:1A86:FE00.*/events`, bracketed with known-good
+buttons.
+
+**The evdev nodes InputPlumber matches are unchanged.** The interface-0 keyboard
+keeps name `HID 1a86:fe00` and phys `…-1.2/input0`, and hid-oxp registers no
+input device of its own. Interface 1 collapses from Mouse/Consumer/System
+Control nodes into one `HID 1a86:fe00` on `input1`; the config pins `input0`,
+so this is harmless.
+
+**Paddles: the init order is wrong for this board.** At bind and after resume,
+`oxp_mcu_init_fn` sends the button map (`B4`; M1/M2 = `KEY_F16`/`KEY_F17`
+*inside the MCU*), then cycles the mode debug→xinput (`B2 03…`, `B2 00…`), then
+sets rumble (`B3`). On this unit the switch to xinput discards the map:
+
+| state | paddles |
+|---|---|
+| after hid-oxp's init at boot | nothing |
+| map re-sent (write `button_m1` with its own value) | B2 `0x22` left, `0x23` right |
+| hid-oxp's init runs again | nothing |
+| debug→xinput via sysfs with `paddle-watch` running | B2 `0x22`/`0x23`, X-Box pad live |
+
+`0x22` is the **left** paddle here; on the APEX it is the right one, and `oxp8`
+swaps them. No F16/F17 ever appears on the keyboard interface: the mapped code
+only rides inside the B2 frame (byte 9 = `0x69`/`0x6a`). So the paddles reach
+InputPlumber solely through the hidraw `oxp_hid` source, as `LeftPaddle1` and
+`RightPaddle1`, and deck-uhid passes them through as L4/R4 with no
+capability-map rule.
+
+**The workaround**, shipped in `onexplayer-x2mini`: `paddle-watch`
+(`oxp-x2mini-paddles.service`, started by a udev rule on hid-oxp bind) reads the
+vendor hidraw node. When it sees the MCU confirm a switch to xinput
+(`b2 3f 01 00 01`, the last step of every init), it re-sends the map by
+rewriting `button_m1` with its current value. Any button write re-sends the
+whole map, so sysfs remaps survive. Not yet exercised across a real resume.
+
+**Do not remap M1/M2 in hid-oxp sysfs.** That remap happens inside the
+controller, and moves the paddles out of the vendor frames InputPlumber reads.
+Remap in Steam.
+
+**Its constants confirm what was derived by hand**, and name the rest (checked
+against the mainline source):
 
 **It already binds this controller — no patch needed.** Its device table matches
 `USB_VENDOR_ID_WCH` (`0x1a86`) / `USB_DEVICE_ID_ONEXPLAYER_GEN2` (`0xfe00`),
@@ -515,14 +583,22 @@ which is exactly the interface reverse-engineered above.
 | `OXP_FID_GEN2_KEY_STATE` | `0xb4` | — |
 | `OXP_FID_GEN2_STATUS_EVENT` | `0xb8` | **RGB**, both read and write |
 
-So rumble and RGB are reachable over the same hidraw interface, on the current
-kernel, without waiting for 7.2. RGB writes are
-`oxp_gen_2_property_out(0xb8, {OXP_SET_PROPERTY, 0x00, 0x02, enabled, speed,
-brightness}, 6)`, and state is read back from inbound `0xb8` frames as
-`struct oxp_gen_2_rgb_report`: `enabled, speed, brightness, red, green, blue` at
-bytes 6–11, `effect` at byte 15.
+RGB writes are `oxp_gen_2_property_out(0xb8, {OXP_SET_PROPERTY, 0x00, 0x02,
+enabled, speed, brightness}, 6)`. State is read back from inbound `0xb8` frames
+as `struct oxp_gen_2_rgb_report`: `enabled, speed, brightness, red, green, blue`
+at bytes 6–11, `effect` at byte 15. **On this unit none of it takes effect**
+(next section).
 
-### An open question that decides a kernel patch
+**Rumble** needs nothing: deck-uhid → force feedback on the X-Box pad (xpad), as
+before. hid-oxp adds `rumble_intensity` (0–5), re-applied after every mode
+switch.
+
+**Possible false reset detection.** hid-oxp re-runs its init on any inbound `B8`
+frame with `data[3] == 0xFE` (meant as the MCU's post-resume reset), and
+`0xFE` is also the monocolor command byte. During testing a monocolor write was
+followed ~3 s later by an unprompted re-init. The watcher covers that too.
+
+### RGB: the open question, answered — this board belongs on the skip list
 
 `hid-oxp` keeps `oxp_hybrid_mcu_list` — currently the APEX, G1 A and G1 i. Devices
 on it **skip RGB LED registration** on the GEN2 usage page:
@@ -535,17 +611,17 @@ if (up == GEN2_USAGE_PAGE && oxp_hybrid_mcu_device())
 It is not fatal — it gates only the RGB class device, so the paddles work either
 way. But this machine is not on that list, so 7.2 will try to register RGB here.
 
-Whether that is right is **untested and decides whether a fourth patch is owed**:
+**Tested on 7.2.3: RGB does not work over the `0xb8` path.** 7.2 registers
+`oxp:rgb:joystick_rings`, but:
 
-- If RGB works over the `0xb8` path, the absence is correct — being added would
-  *lose* RGB.
-- If it does not, an entry is needed, or 7.2 registers an LED device that does
-  nothing.
+- `effect=green_breathing`: the MCU acknowledges (`b8 3f 01 0e …`), its status
+  frame still reports effect `09` (cyberpunk), and the rings did not change.
+- `effect=monocolor` + `multi_intensity=255 0 0`: no change either.
 
-The APEX shares this board and *is* on the list, which is weak evidence for the
-second. Weak, not conclusive: "hybrid MCU" plausibly describes where the RGB
-controller lives, and the two machines' controllers already differ (§7). Testing
-the `0xb8` write on the current kernel settles it before 7.2 arrives.
+So the board should be on `oxp_hybrid_mcu_list`, like the APEX it shares a
+board with. As things stand, 7.2 registers an LED device here that does nothing.
+That is a candidate fourth upstream patch. Notes are in `docs/controller.md`,
+along with the init-order fix for the paddles; neither has been sent.
 
 ### Three traps that each cost a debugging round
 
@@ -573,7 +649,7 @@ the `0xb8` write on the current kernel settles it before 7.2 arrives.
    re-enqueued (`composite_device/mod.rs:729,735`), so the second rule's output
    re-enters translation and fires the first. Symptom: two buttons do the same
    thing.
-3. **Home is unmappable on 0.78.0.** Any rule sourcing its capability works
+3. **Home is unmappable on 0.78.0** (not yet re-tested on 0.81.0). Any rule sourcing its capability works
    alone then corrupts the *next* press: Home alone → 1 screenshot; Home then
    OneXPlayer → 2 screenshots and no QAM. The signature is Home's release
    failing to clear the capability from `translatable_active_inputs`. The
@@ -617,7 +693,7 @@ Hardware topology (identical to the APEX's "Original Firmware" paths):
 |---|---|
 | gamepad | `Microsoft X-Box 360 pad`, `usb-0000:65:00.4-1.3/input0` |
 | OXP buttons | `HID 1a86:fe00`, `usb-0000:65:00.4-1.2/input0` |
-| vendor HID | hidraw `1a86:fe00` interface 2 — Home; paddles need intercept mode |
+| vendor HID | hidraw `1a86:fe00` interface 2 — Home, and on 7.2 the paddles |
 | keyboard | `AT Translated Set 2 keyboard`, `isa0060/serio0/input0` |
 | IMU | `bmi260` at `i2c-BMI0160:00` |
 
@@ -626,9 +702,10 @@ and should **not** be folded into the CompositeDevice.
 
 ---
 
-## 8. Suspend — requires two kernel parameters
+## 8. Suspend — requires two kernel parameters (on 7.1; 7.2 untested)
 
-**s2idle works, but only with these on the kernel command line:**
+**On 7.1.6, s2idle works, but only with these on the kernel command line.**
+Linux 7.2 has not been tested without them yet:
 
 ```
 amd_iommu=off mem_sleep_default=s2idle
@@ -672,7 +749,10 @@ s0ix entry hung. Do not repeat that bisect.
 
 **The controller survives resume.** PCI `0000:65:00.4` stays bound to `xhci_hcd`
 across the transition and all buttons work, so the APEX's resume-rebind service
-is not needed here — confirm before porting it.
+is not needed here — confirm before porting it. On 7.2, hid-oxp re-initialises
+the MCU ~6 s after resume, which silences the paddles until `paddle-watch`
+re-arms them (§7). Check `journalctl -u oxp-x2mini-paddles` after the first real
+resume on 7.2.
 
 Consequence for anything driving TDP: SMU limits do **not** survive a power
 transition, so a resume hook is required. Ours (logind `PrepareForSleep`) is now
@@ -682,19 +762,21 @@ confirmed working — it re-applies the limit at the resume timestamp.
 
 ## 9. Kernel version dependencies
 
-Tested on `7.1.6-1-cachyos-deckify`. **Linux 7.2 had not shipped in CachyOS as of
-2026-08-04**, and a beta or mainline kernel is deliberately not a prerequisite for
-any of this. Check `uname -r` before assuming the rows below are stale.
+**Linux 7.2 is in CachyOS** (`7.2.3-1-cachyos-deckify`, running on this unit
+since 2026-09-26). Status of everything that depended on a kernel version:
 
-| Item | Needs | Confidence | Effect |
-|---|---|---|---|
-| Back paddles | 7.2 (`hid-oxp`) | **Likely** — in mainline, and its device table already matches `1a86:fe00` (§7) | Valve-authored driver that manages vendor intercept mode. Today the paddles emit nothing and enabling intercept by hand silences the entire X-Box gamepad (§7), so there is no usable workaround. |
-| RGB and rumble | *not* a kernel version | **Available now** | `hid-oxp` documents the GEN2 frames (§7), so both are reachable over hidraw on 7.1.6. 7.2 would add a proper LED class device — but only if the `oxp_hybrid_mcu_list` question in §7 resolves the right way. |
-| Dropping `amd_iommu=off` | a kernel that fixes s0ix entry | **Unproven** | Would restore the NPU and DMA remapping while keeping suspend. Cheap and reversible to test: remove the parameter, reboot, run `suspend/suspend-test.sh ladder`. |
-| Custom Home mapping | *not* a kernel fix | **Unlikely from 7.2** | Blocked by an InputPlumber 0.78 userspace bug (§7). `hid-oxp` might sidestep it by reporting button `0x24` differently, but nothing guarantees that. |
+| Item | Needs | Status |
+|---|---|---|
+| Back paddles | 7.2 (`hid-oxp`) + `paddle-watch` | **Working** — hid-oxp alone leaves them silent on this board (init order, §7); the watcher re-arms them. The real fix is in hid-oxp. |
+| RGB | an hid-oxp change | **Not working** — the controller ignores the `0xb8` RGB path; the board belongs on `oxp_hybrid_mcu_list` (§7). |
+| Rumble | nothing | Works via xpad force feedback; hid-oxp adds a strength setting. |
+| oxpec DMI entry | 7.3 | Upstream (`1b3c0028`, v7.3-rc1). The DKMS package covers 7.2 and older, and skips itself on 7.3+ (§4.2). |
+| ryzen_smu PM table | none (out-of-tree) | Upstream (`b098884`). `ryzen_smu-dkms-git` builds on 7.2 only from `d298366` onward (§4.1). |
+| Dropping `amd_iommu=off` | a kernel that fixes s0ix entry | **Untested on 7.2.** Cheap and reversible: without the parameter, run `suspend/suspend-test.sh ladder`, then `none`, at the console. |
+| Custom Home mapping | an InputPlumber fix | Blocked on 0.78 (§7). Not re-tested on 0.81.0; hid-oxp does not change how `0x24` is reported. |
 
-Independent of kernel version: the `ryzen_smu` PM table patch (§2.3) and the
-`oxpec` DMI entry (§4) are ours to upstream.
+Still ours to upstream: the two hid-oxp changes in `docs/controller.md`
+(paddle init order; RGB skip list). Both kernel patches we did send are merged.
 
 ---
 
@@ -712,11 +794,17 @@ sudo ryzenadj -i                                 # second opinion
 cat /sys/kernel/ryzen_smu_drv/codename           # 26 = Strix Halo
 sudo od -A n -t f4 -N 24 -w24 /sys/kernel/ryzen_smu_drv/pm_table
 
+# controller (hid-oxp, 7.2)
+systemctl status oxp-x2mini-paddles              # paddle re-arm watcher
+D=$(dirname /sys/bus/hid/drivers/hid-oxp/*/button_m1); cat $D/gamepad_mode $D/button_m1
+sudo cat /sys/kernel/debug/hid/0003:1A86:FE00.*/events   # raw reports, under any grab
+
 # fan / battery
 for h in /sys/class/hwmon/hwmon*; do [ "$(cat $h/name)" = oxp_ec ] && echo $h; done
 cat /sys/class/power_supply/BATT/charge_control_end_threshold
 
 # display
+journalctl --user -b | grep 'known display'      # lenovo_legiongo2_oled
 DISPLAY=:0 xprop -root GAMESCOPE_DISPLAY_SUPPORTS_HDR GAMESCOPE_HDR_OUTPUT_FEEDBACK
 edid-decode /sys/class/drm/card1-eDP-1/edid
 journalctl -t p-holo-priv-write -b               # brightness writes
@@ -728,5 +816,8 @@ Upstream sources used, all fetched during this work:
 |---|---|
 | steamos-manager | `gitlab.steamos.cloud/holo/steamos-manager` — `examples/basic_remote.rs`, `src/power.rs` |
 | RyzenAdj | `github.com/FlyGoat/RyzenAdj` — `lib/api.c` family dispatch, LGPL-3.0 |
-| ryzen_smu | `github.com/amkillam/ryzen_smu` — `smu.c` |
+| ryzen_smu | `github.com/amkillam/ryzen_smu` — `smu.c`, `drv.c` |
+| hid-oxp | `torvalds/linux` v7.2 — `drivers/hid/hid-oxp.c` |
+| InputPlumber | `github.com/ShadowBlip/InputPlumber` v0.81.0 — `oxp_hid`, `steam_deck_uhid.rs` |
+| gamescope | `/usr/share/gamescope/scripts/00-gamescope/displays/lenovo.legiongo2.oled.lua` (3.16.30) |
 | z13ctl | `github.com/dahui/z13ctl` — `internal/cli/smu.go` mailbox transport, Apache-2.0 |

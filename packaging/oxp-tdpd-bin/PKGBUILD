@@ -20,11 +20,13 @@ pkgdesc="TDP daemon for the ONEXPLAYER X2Mini PRO (steamos-manager TdpLimit1 rem
 arch=('x86_64')
 url="https://github.com/dahui/$_reponame"
 license=('GPL-2.0-only')
-depends=('dbus')
-# Read-back needs the patched ryzen_smu; the daemon degrades to a cached value
-# without it, so this is optional rather than a hard dependency.
+# ryzen_smu is a hard dependency: every TDP command goes through its sysfs
+# mailbox, not just read-back, so without it the daemon has nothing to drive.
+# Satisfied by ryzen_smu-dkms-git (AUR, the amkillam fork), which carries this
+# device's PM table version 0x64010C upstream since amkillam/ryzen_smu@b098884.
+# It is not in the CachyOS repos, so install.sh installs it before this package.
+depends=('dbus' 'ryzen_smu-dkms')
 optdepends=(
-	'ryzen-smu-x2mini-dkms: TDP read-back from the SMU PM table'
 	'steamos-manager: exposes the limit through Steam'"'"'s slider'
 )
 provides=('oxp-tdpd')
@@ -52,6 +54,13 @@ package() {
 
 	install -Dm644 tdpd/contrib/oxp-tdpd.service \
 		"$pkgdir/usr/lib/systemd/system/oxp-tdpd.service"
+
+	# Loads ryzen_smu before the unit's ConditionPathExists is evaluated. udev
+	# would load it anyway through its PCI alias, but nothing orders that ahead
+	# of this service, and a condition that fails once skips the unit for the
+	# whole boot rather than retrying.
+	install -Dm644 tdpd/contrib/modules-load.d/oxp-tdpd.conf \
+		"$pkgdir/usr/lib/modules-load.d/oxp-tdpd.conf"
 
 	# System bus policy. Note this must allow sends from the default context,
 	# not just root: it is steamos-manager's *user* daemon that proxies

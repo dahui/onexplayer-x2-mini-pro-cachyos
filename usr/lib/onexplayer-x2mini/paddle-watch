@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 Jeff Hagadorn <jeff@aletheia.io>
+#
+# Keep the ONEXPLAYER X2Mini PRO back paddles reporting under hid-oxp.
+#
+# The paddles only report once the controller MCU has been sent its button map
+# (a B4 frame), and on this unit the map is lost whenever the MCU is switched
+# into xinput mode afterwards. hid-oxp's init does exactly that in the wrong
+# order -- map first, then a debug->xinput mode cycle -- so after every init
+# (probe, each resume, and some stray ones) the paddles fall silent. Measured on
+# 7.2.3 with raw HID captures: map alone -> paddles report as vendor B2 frames
+# 0x22 (left) / 0x23 (right); map followed by the cycle -> nothing.
+#
+# The fix belongs in hid-oxp (see docs/controller.md). Until then this watches
+# the vendor hidraw node, read-only, for the MCU confirming a switch to xinput
+# mode -- the last step of every init -- and re-sends the map right after it.
+#
+# Writing any button attribute makes hid-oxp send the whole map again with its
+# current settings, so rewriting button_m1 with its own value changes nothing
+# except re-arming the paddles. Custom remaps made through sysfs survive.
+#
+# Started by 70-onexplayer-x2mini-paddles.rules; exits non-zero when the node
+# disappears so systemd restarts it against the new one.
+
+set -uo pipefail
+
+log() { printf '%s\n' "$*"; }
+
+case "$(cat /sys/class/dmi/id/board_name 2>/dev/null)" in
+	"ONEXPLAYER X2Mini"*) ;;
+	*) log "not an ONEXPLAYER X2Mini; nothing to do"; exit 0 ;;
+esac
+
+dev=""
+for d in /sys/bus/hid/drivers/hid-oxp/*/; do
+	if [[ -e "${d}button_m1" ]]; then dev="${d%/}"; break; fi
+done
+[[ -n "$dev" ]] || { log "no hid-oxp interface exposing button_m1 -- is hid-oxp bound?"; exit 1; }
+
+node=""
+for h in "$dev"/hidraw/hidraw*; do node="${h##*/}"; done
+[[ -n "$node" && -e "/dev/$node" ]] || { log "no hidraw node under $dev"; exit 1; }
+
+last=-10
+resend() {
+	local v
+	v="$(<"$dev/button_m1")" || return 1
+	printf '%s\n' "$v" > "$dev/button_m1" || { log "writing $dev/button_m1 failed"; return 1; }
+	last=$SECONDS
+	log "re-sent button map ($1)"
+}
+
+# hid-oxp schedules its own init 50 ms after binding; let it finish first.
+sleep 2
+resend "start"
+
+# One 64-byte report per line. The mode-switch confirmation is
+#   b2 3f 01 00 01 ...   (byte 3 = mode: 00 xinput, 03 debug)
+# Button reports share the b2 prefix but carry 01 in byte 3, so they never match.
+while read -r -a b; do
+	[[ "${b[0]:-} ${b[1]:-} ${b[2]:-} ${b[3]:-} ${b[4]:-}" == "b2 3f 01 00 01" ]] || continue
+	# A B4 write is not echoed, so this cannot feed itself, but an init and a
+	# user's gamepad_mode write can land back to back -- one re-send covers both.
+	(( SECONDS - last < 2 )) && continue
+	# Let the rumble write that follows the mode switch go out first.
+	sleep 0.5
+	resend "controller switched to xinput"
+done < <(stdbuf -oL od -An -v -tx1 -w64 "/dev/$node")
+
+log "lost /dev/$node -- exiting so systemd restarts against the new node"
+exit 1

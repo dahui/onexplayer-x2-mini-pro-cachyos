@@ -4,6 +4,9 @@ _refresh() {
 	systemd-hwdb update 2>/dev/null || true
 	udevadm control --reload 2>/dev/null || true
 	udevadm trigger --subsystem-match=input --action=add 2>/dev/null || true
+	# Replays the hid-oxp bind so 70-onexplayer-x2mini-paddles.rules starts the
+	# paddle watcher now rather than at the next boot.
+	udevadm trigger --subsystem-match=hid --action=add 2>/dev/null || true
 }
 
 _kernel_params_notice() {
@@ -53,8 +56,15 @@ post_install() {
 }
 
 post_upgrade() {
+	systemctl daemon-reload 2>/dev/null || true
+	# Pick up a new paddle-watch; the udev trigger in _refresh starts it again.
+	systemctl stop oxp-x2mini-paddles.service 2>/dev/null || true
 	_refresh
 	_kernel_params_notice
+}
+
+pre_remove() {
+	systemctl stop oxp-x2mini-paddles.service 2>/dev/null || true
 }
 
 post_remove() {

@@ -79,11 +79,11 @@ jobs:
           sed -i "s|^pkgver=.*|pkgver=$VERSION|" packaging/*/PKGBUILD
           grep -H '^pkgver=' packaging/*/PKGBUILD
 
-      - name: Build the self-contained packages
-        # The two DKMS packages build from sources sitting next to their
-        # PKGBUILDs, so they need nothing that does not exist yet. Both are
-        # arch=any and ship source only -- the user's machine compiles the
-        # module -- so a package built here is portable to any Arch install.
+      - name: Build the self-contained package
+        # The DKMS package builds from sources sitting next to its PKGBUILD, so
+        # it needs nothing that does not exist yet. It is arch=any and ships
+        # source only -- the user's machine compiles the module -- so a package
+        # built here is portable to any Arch install.
         #
         # Build in a container-local copy, NOT in the bind mount. `chown -R` on
         # /work would hand the runner's whole workspace to the container UID and
@@ -96,7 +96,7 @@ jobs:
             useradd -m builder
             cp -a /work /build
             chown -R builder /build
-            for p in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
+            for p in oxpec-x2mini-dkms; do
               runuser -u builder -- bash -c "cd /build/packaging/$p && makepkg -f --nodeps --noconfirm"
               cp /build/packaging/$p/*.pkg.tar.zst /work/dist/
             done
@@ -117,7 +117,7 @@ jobs:
       # have to be distinguished from "checksum mismatch". If the job dies
       # between the two passes the release simply has no SHA256SUMS, and both
       # scripts refuse to install rather than installing something unverified.
-      - name: Publish (binary and DKMS packages)
+      - name: Publish (binary and DKMS package)
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -131,14 +131,10 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
-            Installs from the AUR, plus `ryzen-smu-x2mini-dkms` from here.
-
-            **If the AUR is unavailable**, every package is also attached below
-            and can be installed with pacman alone — no AUR helper:
-
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-from-release.sh | bash
-            ```
+            Installs the three packages below with pacman, after checking them
+            against `SHA256SUMS`. It also needs `ryzen_smu-dkms-git` from the AUR
+            (the amkillam fork, which carries this device's PM table upstream);
+            the script installs it with your AUR helper, or offers to build it.
 
             `oxp-tdpd` is statically linked and built from this tag by CI.
             Verify everything against `SHA256SUMS` before use.
@@ -172,10 +168,8 @@ jobs:
         # that path: a broken source= or an asset that never became reachable
         # fails the release instead of surfacing as a user's failed install.
         #
-        # They are attached so the whole set can be installed with pacman alone.
-        # The AUR is the normal route, but it has been unavailable for extended
-        # periods, and a package set where three of five come from a channel
-        # that is down is not installable at all.
+        # The release page is the only distribution channel: install.sh installs
+        # these with pacman.
         run: |
           docker run --rm -v "$PWD:/work" archlinux:base-devel bash -c '
             set -euo pipefail

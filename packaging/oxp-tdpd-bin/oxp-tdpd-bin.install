@@ -11,8 +11,6 @@ post_install() {
 	    steamosctl get-tdp-limit
 	    sudo oxp-tdpd --status
 
-	Read-back reports a cached value unless ryzen-smu-x2mini-dkms is
-	installed; setting limits works either way.
 
 	EOF
 }

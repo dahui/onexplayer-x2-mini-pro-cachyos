@@ -2,9 +2,15 @@
 #
 # Patched oxpec EC driver for the ONEXPLAYER X2Mini PRO.
 #
-# Stock oxpec has no DMI entry for this machine, so fan RPM/PWM and the battery
-# charge limit are unavailable. This adds the entry, reusing the APEX's board
-# type (oxp_fly) unchanged -- same system board.
+# Stock oxpec has no DMI entry for this machine before Linux 7.3, so fan
+# RPM/PWM and the battery charge limit are unavailable. This adds the entry,
+# reusing the APEX's board type (oxp_fly) unchanged -- same system board.
+#
+# TEMPORARY. The entry is upstream (mainline 1b3c0028, first in v7.3-rc1), and
+# oxpec.c here is v7.2's driver plus exactly that hunk. dkms.conf restricts the
+# build to kernels before 7.3, so on 7.3+ this package installs nothing and the
+# in-tree driver takes over. Delete the package once 7.3 is the oldest kernel
+# anyone runs.
 #
 # The package name is deliberately distinct from any upstream oxpec package, but
 # the *module* it builds is still oxpec.ko. That is required: the module name is
@@ -20,7 +26,7 @@ pkgname=oxpec-x2mini-dkms
 pkgver=0.1.0
 pkgrel=1
 _modver=1.0
-pkgdesc="OneXPlayer EC driver (fan, charge limit) with ONEXPLAYER X2Mini PRO support - DKMS"
+pkgdesc="OneXPlayer EC driver (fan, charge limit) with ONEXPLAYER X2Mini PRO support, for kernels before 7.3 - DKMS"
 arch=('any')
 url="https://github.com/dahui/onexplayer-x2-mini-pro-cachyos"
 license=('GPL-2.0-or-later')
@@ -31,7 +37,7 @@ conflicts=('oxpec-x2mini')
 source=('oxpec.c' 'Makefile' 'dkms.conf')
 sha256sums=('254499952d4b2383b0cee42e3349323023e3e9624aa269628de92835568e20f7'
             '32dae33d7bf42c42e987e3b08a6793dd57527add921a39398beb3e76d942ddf1'
-            'b59d2d967a2cb63adc3b49e8c90adc648924d001944ffa1dcb81226978d5aa70')
+            'd4bc2e9ab8085b3db5e1303dfbe0c982bb38c088dff1fb29059da28c3faf5875')
 
 package() {
 	local dest="$pkgdir/usr/src/oxpec-x2mini-$_modver"

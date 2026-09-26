@@ -6,31 +6,27 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/dahui/onexplayer-x2-mini-pro-cachyos/main/install.sh | bash
 #
-# Standalone on purpose -- no clone required. Everything it installs is either
-# an AUR package or a prebuilt package attached to a GitHub release, so there is
-# nothing in the repository this needs. It never copies configuration into place
+# Standalone on purpose -- no clone required. Everything it installs is a pacman
+# package: ours come from the GitHub release page, checksum-verified, and the
+# rest from the repos or the AUR. It never copies configuration into place
 # itself: those files are owned by onexplayer-x2mini, and writing them
-# separately would leave pacman reporting them as modified and give the two
-# install paths room to drift.
+# separately would leave pacman reporting them as modified.
 #
-#   onexplayer-x2mini        AUR      configs; pulls in everything below
-#     steamos-manager        repo     TDP slider, performance profiles
-#     inputplumber           repo     button mapping
-#     oxp-tdpd-bin           AUR      TDP daemon (prebuilt -- no Go toolchain)
-#     oxpec-x2mini-dkms      AUR      fan + charge limit
-#   ryzen-smu-x2mini-dkms    release  TDP read-back
+#   ryzen_smu-dkms-git       AUR       SMU mailbox for oxp-tdpd (see below)
+#   oxpec-x2mini-dkms        release   fan + charge limit (kernels before 7.3)
+#   oxp-tdpd-bin             release   TDP daemon (prebuilt -- no Go toolchain)
+#   onexplayer-x2mini        release   configs + paddle watcher
+#     steamos-manager        repo      TDP slider, performance profiles
+#     inputplumber           repo      button mapping
 #
-# ryzen-smu-x2mini-dkms is the one exception to "everything is on the AUR". It
-# forks an existing AUR package and is meant to disappear once its patch is
-# upstreamed, so it is published on the releases page instead -- see
-# packaging/README.md. It is downloaded and checksum-verified below.
+# ryzen_smu-dkms-git is the one package that is neither ours nor in the
+# CachyOS repos. It is a hard requirement -- oxp-tdpd sends every TDP command
+# through its sysfs mailbox -- so it is installed first: with an AUR helper if
+# there is one, otherwise by building the AUR package locally if the user
+# agrees. This machine's PM table version is supported upstream since
+# amkillam/ryzen_smu@b098884, so no patched fork is needed any more.
 #
-# If the AUR is unavailable, install-from-release.sh installs the same packages
-# from the release page with plain pacman and no AUR helper. Keep the two in
-# step: everything outside the "where do packages come from" middle section is
-# meant to be identical, so the machine ends up the same either way.
-#
-# The kernel command line is left alone on purpose: suspend needs
+# The kernel command line is left alone on purpose: suspend has needed
 # amd_iommu=off, which costs the NPU, so that stays a conscious choice. This
 # script only tells you what to add.
 
@@ -39,9 +35,12 @@ set -euo pipefail
 REPO="${OXP_REPO:-dahui/onexplayer-x2-mini-pro-cachyos}"
 TAG="${OXP_TAG:-latest}"
 
-SKIP_RYZEN_SMU=0
+RYZEN_SMU_PKG=ryzen_smu-dkms-git
+RYZEN_SMU_UPSTREAM=https://github.com/amkillam/ryzen_smu
+
 FORCE="${FORCE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
+KEEP=0
 
 if [[ $EUID -eq 0 ]]; then SUDO=""; else SUDO="sudo"; fi
 
@@ -63,13 +62,16 @@ usage() {
 	cat <<-EOF
 	Usage: install.sh [options]
 
-	  --skip-ryzen-smu   do not install the ryzen_smu fork (loses TDP read-back)
+	Installs the ONEXPLAYER X2Mini PRO packages from the GitHub release with
+	pacman, plus ryzen_smu-dkms-git from the AUR.
+
+	  --keep             leave the downloaded packages in place and print where
 	  --dry-run          print what would happen, change nothing
 	  --force            install even if this is not an X2Mini
 	  -h, --help         this text
 
 	Environment:
-	  OXP_TAG=v0.1.0     install a specific release instead of the latest
+	  OXP_TAG=v0.2.0     install a specific release instead of the latest
 
 	Piped from curl, pass arguments after --:
 	  curl -fsSL .../install.sh | bash -s -- --dry-run
@@ -78,7 +80,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-		--skip-ryzen-smu) SKIP_RYZEN_SMU=1 ;;
+		--keep)           KEEP=1 ;;
 		--dry-run)        DRY_RUN=1 ;;
 		--force)          FORCE=1 ;;
 		-h|--help)        usage; exit 0 ;;
@@ -104,11 +106,22 @@ case "$PRODUCT" in
 esac
 
 [[ $EUID -eq 0 ]] && die "run this as your normal user, not root.
-    paru refuses to build as root, and will call sudo when it needs to."
+    It calls sudo for pacman, and AUR helpers and makepkg refuse to run as root."
 
-for c in curl paru; do
+for c in curl pacman; do
 	have "$c" || die "$c is required but not installed."
 done
+
+# Scratch space for downloads and a possible local ryzen_smu build.
+TMP=""
+if [[ "$DRY_RUN" == "0" ]]; then
+	TMP="$(mktemp -d)"
+	if [[ "$KEEP" == "1" ]]; then
+		trap 'printf "\n    packages left in %s\n" "$TMP"' EXIT
+	else
+		trap 'rm -rf "$TMP"' EXIT
+	fi
+fi
 
 # --- kernel headers ---------------------------------------------------------
 # DKMS needs headers matching the *running* kernel. The packages cannot depend
@@ -122,109 +135,223 @@ else
 	[[ -n "$pkgbase" ]] || die "no kernel headers for $(uname -r), and the package
     name could not be derived. Install your kernel's -headers package."
 	note "missing -- installing ${pkgbase}-headers"
-	if [[ "$DRY_RUN" == "1" ]]; then
-		note "[dry-run] paru -S --needed ${pkgbase}-headers"
-	else
-		paru -S --needed --noconfirm "${pkgbase}-headers"
-	fi
+	run pacman -S --needed --noconfirm "${pkgbase}-headers"
 fi
 
-# --- the ryzen_smu fork, from the release page ------------------------------
-# Installed before the meta package so that if ryzen_smu-dkms-git is already
-# present, the conflict is resolved up front rather than midway through a larger
-# transaction.
-install_ryzen_smu() {
-	say "ryzen-smu-x2mini-dkms (from the releases page)"
+# --- ryzen_smu, from the AUR ------------------------------------------------
+# Needed before the release packages: oxp-tdpd-bin depends on ryzen_smu-dkms,
+# and plain pacman cannot pull that from the AUR.
 
-	local api="https://api.github.com/repos/$REPO/releases/latest"
-	[[ "$TAG" != "latest" ]] && api="https://api.github.com/repos/$REPO/releases/tags/$TAG"
+ryzen_smu_required() {
+	die "ryzen_smu is required, and was not installed.
 
-	local rel tag url pkg base
-	rel="$(curl -fsSL "$api")" || die "could not query release '$TAG' of $REPO.
-    The repository may have no releases yet."
-	tag="$(printf '%s' "$rel" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+    oxp-tdpd sends every TDP command -- not just read-back -- through the
+    ryzen_smu kernel module's SMU mailbox (/sys/kernel/ryzen_smu_drv). Without
+    it Steam's TDP slider does nothing, and oxp-tdpd.service is skipped at boot.
 
-	# Take the asset URL the release actually advertises rather than
-	# reconstructing the filename. pkgrel is not always 1 -- a rebuild at the
-	# same pkgver bumps it to -2- -- and a guessed filename would simply 404.
-	url="$(printf '%s' "$rel" \
-		| grep -oE '"browser_download_url": *"[^"]*ryzen-smu-x2mini-dkms[^"]*\.pkg\.tar\.zst"' \
-		| sed 's/.*"\(https[^"]*\)"/\1/' | head -1)"
-	[[ -n "$url" ]] || die "release $tag has no ryzen-smu-x2mini-dkms package attached.
-    Build it from a clone instead: packaging/ryzen-smu-x2mini-dkms"
+    It is packaged in the AUR as $RYZEN_SMU_PKG: the amkillam fork, which
+    supports this machine's Strix Halo firmware. Install it with any AUR
+    helper, or build it with makepkg, then re-run this script:
 
-	pkg="$(basename "$url")"
-	base="https://github.com/$REPO/releases/download/$tag"
+        paru -S $RYZEN_SMU_PKG
 
-	if [[ "$DRY_RUN" == "1" ]]; then
-		note "$tag -> $pkg"
-		note "[dry-run] download, verify against SHA256SUMS, pacman -U"
+    Upstream: $RYZEN_SMU_UPSTREAM
+    AUR:      https://aur.archlinux.org/packages/$RYZEN_SMU_PKG"
+}
+
+# Yes/no on the terminal. stdin is the script itself when piped from curl, so
+# read /dev/tty. Returns 0 yes, 1 no, 2 when there is no terminal to ask on.
+ask_yes_no() {
+	local ans
+	{ exec 3<>/dev/tty; } 2>/dev/null || return 2
+	printf '    %s [y/N] ' "$1" >&3
+	read -r ans <&3 || { exec 3>&-; return 2; }
+	exec 3>&-
+	[[ "$ans" == [yY]* ]]
+}
+
+build_ryzen_smu() {
+	have git || die "git is needed to fetch the package source:  sudo pacman -S git"
+	pacman -Qq base-devel >/dev/null 2>&1 \
+		|| die "base-devel is needed to build packages:  sudo pacman -S --needed base-devel"
+
+	local dir="$TMP/$RYZEN_SMU_PKG"
+	# The AUR's own git, falling back to its official GitHub mirror, which stays
+	# up when aur.archlinux.org does not.
+	if git clone -q --depth 1 "https://aur.archlinux.org/$RYZEN_SMU_PKG.git" "$dir" 2>/dev/null \
+	   && [[ -f "$dir/PKGBUILD" ]]; then
+		note "fetched from aur.archlinux.org"
+	else
+		rm -rf "$dir"
+		git clone -q --depth 1 --single-branch --branch "$RYZEN_SMU_PKG" \
+			https://github.com/archlinux/aur.git "$dir" \
+			|| die "could not fetch $RYZEN_SMU_PKG from the AUR or its GitHub mirror."
+		note "fetched from the AUR's GitHub mirror"
+	fi
+
+	# makepkg -s installs build dependencies with sudo; -i installs the result.
+	( cd "$dir" && makepkg -si --needed --noconfirm ) \
+		|| die "building $RYZEN_SMU_PKG failed. The PKGBUILD is in $dir."
+}
+
+ensure_ryzen_smu() {
+	say "ryzen_smu ($RYZEN_SMU_PKG, AUR)"
+
+	# Earlier versions of this project shipped a patched fork. It provides
+	# ryzen_smu-dkms too, so it would satisfy the check below -- but it pins a
+	# commit that no longer builds on Linux 7.2, and it conflicts with the real
+	# package. Replace it. -dd because oxp-tdpd-bin depends on the provision and
+	# it is reinstated immediately below.
+	if pacman -Qq ryzen-smu-x2mini-dkms >/dev/null 2>&1; then
+		note "removing ryzen-smu-x2mini-dkms, the old patched fork -- its patch"
+		note "is upstream now, and it does not build on Linux 7.2"
+		run pacman -Rdd --noconfirm ryzen-smu-x2mini-dkms \
+			|| die "could not remove ryzen-smu-x2mini-dkms"
+	elif pacman -T ryzen_smu-dkms >/dev/null 2>&1; then
+		note "already installed: $(pacman -Qq "$RYZEN_SMU_PKG" 2>/dev/null || echo ryzen_smu-dkms)"
 		return 0
 	fi
 
-	local tmp
-	tmp="$(mktemp -d)"
-	# shellcheck disable=SC2064  # expand tmp now, not at trap time
-	trap "rm -rf '$tmp'" RETURN
+	local helper=""
+	for h in paru yay; do
+		if have "$h"; then helper="$h"; break; fi
+	done
 
-	note "$tag"
-	curl -fsSL -o "$tmp/$pkg" "$url" \
-		|| die "could not download $pkg from release $tag"
-
-	# The package is installed with pacman -U straight off the internet, so the
-	# checksum is not optional.
-	if curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" 2>/dev/null; then
-		( cd "$tmp" && grep -F "$pkg" SHA256SUMS | sha256sum -c --status - ) \
-			|| die "CHECKSUM MISMATCH for $pkg.
-    Do not use this download. Report it at https://github.com/$REPO/issues"
-		note "checksum verified"
-	else
-		die "no SHA256SUMS published for $tag, so $pkg cannot be verified.
-    Refusing to install an unverified kernel module.
-    Build it yourself instead: packaging/ryzen-smu-x2mini-dkms"
+	if [[ -n "$helper" ]]; then
+		note "installing with $helper"
+		if [[ "$DRY_RUN" == "1" ]]; then
+			note "[dry-run] $helper -S --needed $RYZEN_SMU_PKG"
+			return 0
+		fi
+		"$helper" -S --needed --noconfirm "$RYZEN_SMU_PKG" \
+			|| die "$helper could not install $RYZEN_SMU_PKG.
+    If the AUR is unreachable, re-run once it is back; see $RYZEN_SMU_UPSTREAM"
+		return 0
 	fi
 
-	# ryzen-smu-x2mini-dkms conflicts with ryzen_smu-dkms-git deliberately --
-	# that conflict is the whole point of the package, since an update of the
-	# upstream one silently reverts the PM table patch and breaks every
-	# ryzenadj-based tool.
-	#
-	# pacman asks before removing a conflicting package, and that prompt defaults
-	# to NO (callback.c uses noyes for ALPM_QUESTION_CONFLICT_PKG). Under
-	# --noconfirm the default is what it takes, so the install below would abort
-	# with "unresolvable package conflicts detected". Remove it up front instead,
-	# where it can be explained.
-	if pacman -Qq ryzen_smu-dkms-git >/dev/null 2>&1; then
-		note "removing ryzen_smu-dkms-git first -- ours carries the PM table"
-		note "patch this device needs, and the two cannot coexist"
-		$SUDO pacman -R --noconfirm ryzen_smu-dkms-git \
-			|| die "could not remove ryzen_smu-dkms-git. Something may depend on it:
-      pacman -Qi ryzen_smu-dkms-git"
+	note "no AUR helper found (looked for paru and yay)."
+	note "It can be built here instead: this downloads the AUR package source"
+	note "(PKGBUILD from aur.archlinux.org/$RYZEN_SMU_PKG) and runs makepkg -si."
+	if [[ "$DRY_RUN" == "1" ]]; then
+		note "[dry-run] would ask whether to build $RYZEN_SMU_PKG locally"
+		return 0
 	fi
 
-	$SUDO pacman -U --noconfirm --needed "$tmp/$pkg" \
-		|| die "pacman failed to install $pkg"
+	local rc=0
+	ask_yes_no "Download and build $RYZEN_SMU_PKG now?" || rc=$?
+	case "$rc" in
+		0) build_ryzen_smu ;;
+		2) note "no terminal to ask on"; ryzen_smu_required ;;
+		*) ryzen_smu_required ;;
+	esac
 }
 
-if [[ "$SKIP_RYZEN_SMU" == "0" ]]; then
-	install_ryzen_smu
-else
-	say "Skipping ryzen-smu-x2mini-dkms (--skip-ryzen-smu)"
-	note "TDP control will still work; read-back falls back to a cached value"
+ensure_ryzen_smu
+
+# --- work out what the release offers ---------------------------------------
+say "Release"
+
+API="https://api.github.com/repos/$REPO/releases/latest"
+[[ "$TAG" != "latest" ]] && API="https://api.github.com/repos/$REPO/releases/tags/$TAG"
+
+REL="$(curl -fsSL "$API")" || die "could not query release '$TAG' of $REPO.
+    The repository may have no releases yet."
+REL_TAG="$(printf '%s' "$REL" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+[[ -n "$REL_TAG" ]] || die "could not read a tag name out of the release metadata."
+note "$REL_TAG"
+
+# Every asset URL the release advertises. Matching on the basename below rather
+# than substring-matching the whole URL matters: the repository is called
+# onexplayer-x2-mini-pro-cachyos and appears in every URL, so a substring test
+# for a package name would match the wrong things.
+ASSET_URLS="$(printf '%s' "$REL" \
+	| grep -oE '"browser_download_url": *"[^"]*"' \
+	| sed 's/.*"\(https[^"]*\)"/\1/')"
+
+# Echo the asset URL for a package, matching <pkgname>-<pkgver>-<pkgrel>-<arch>.
+#
+# The [0-9] after the name is load-bearing: pacman package names are not
+# prefix-free. A bare "<want>-*" glob resolves oxp-tdpd to oxp-tdpd-bin, so
+# asking for one package could quietly install a different one. Requiring a
+# digit next means only the real pkgver field can follow the name.
+asset_url_for() {
+	local want="$1" u
+	while read -r u; do
+		[[ -z "$u" ]] && continue
+		case "${u##*/}" in
+			"$want"-[0-9]*.pkg.tar.zst) printf '%s\n' "$u"; return 0 ;;
+		esac
+	done <<-EOF
+	$ASSET_URLS
+	EOF
+	return 1
+}
+
+PACKAGES=(oxpec-x2mini-dkms oxp-tdpd-bin onexplayer-x2mini)
+
+WANT_URLS=()
+for p in "${PACKAGES[@]}"; do
+	u="$(asset_url_for "$p")" || die "release $REL_TAG has no $p package attached.
+    Pick a newer release with OXP_TAG, or build it from a clone:
+      cd packaging/$p && makepkg -si"
+	WANT_URLS+=("$u")
+	note "$(printf '%-24s %s' "$p" "${u##*/}")"
+done
+
+if [[ "$DRY_RUN" == "1" ]]; then
+	note "[dry-run] download the above, verify against SHA256SUMS, pacman -U"
 fi
 
-# --- everything else --------------------------------------------------------
-say "onexplayer-x2mini and its dependencies"
+# --- download and verify ----------------------------------------------------
+if [[ "$DRY_RUN" == "0" ]]; then
+	say "Downloading and verifying"
+
+	for u in "${WANT_URLS[@]}"; do
+		curl -fsSL --retry 3 -o "$TMP/${u##*/}" "$u" \
+			|| die "could not download ${u##*/} from release $REL_TAG"
+	done
+
+	# These are installed with pacman -U straight off the internet, so the
+	# checksum is not optional. A release whose SHA256SUMS is missing is a
+	# half-published one -- CI uploads it only after every artifact is up --
+	# and refusing is the right response to that, not a reason to proceed.
+	SUMS="https://github.com/$REPO/releases/download/$REL_TAG/SHA256SUMS"
+	curl -fsSL -o "$TMP/SHA256SUMS" "$SUMS" 2>/dev/null \
+		|| die "no SHA256SUMS published for $REL_TAG, so these packages cannot be
+    verified. Refusing to install unverified kernel modules and a root daemon.
+    Report it at https://github.com/$REPO/issues"
+
+	for u in "${WANT_URLS[@]}"; do
+		f="${u##*/}"
+		# Require a line for this exact file. Without the emptiness check a
+		# missing entry would hand sha256sum -c nothing to do; it exits non-zero
+		# on empty input today, but relying on that to enforce coverage is a
+		# thin thread to hang a signature check on.
+		line="$(grep -F "  $f" "$TMP/SHA256SUMS" || true)"
+		[[ -n "$line" ]] || die "SHA256SUMS for $REL_TAG has no entry for $f.
+    Do not use this download. Report it at https://github.com/$REPO/issues"
+		( cd "$TMP" && printf '%s\n' "$line" | sha256sum -c --status - ) \
+			|| die "CHECKSUM MISMATCH for $f.
+    Do not use this download. Report it at https://github.com/$REPO/issues"
+		note "verified $f"
+	done
+fi
+
+# --- install ----------------------------------------------------------------
+# One transaction, so pacman resolves the dependencies between these packages
+# (onexplayer-x2mini needs oxp-tdpd, provided by oxp-tdpd-bin) alongside the
+# repo ones it pulls in itself.
+say "Installing"
 if [[ "$DRY_RUN" == "1" ]]; then
-	note "[dry-run] paru -S --needed onexplayer-x2mini"
-	note "          (pulls steamos-manager, inputplumber, oxp-tdpd-bin, oxpec-x2mini-dkms)"
+	note "[dry-run] sudo pacman -U --needed ${PACKAGES[*]}"
+	note "          (pulls steamos-manager, inputplumber, dkms, dbus from the repos)"
 else
-	paru -S --needed --noconfirm onexplayer-x2mini || die "package install failed.
-
-    If the AUR is unreachable or the package is not found there, every package
-    is also attached to the release and installs with pacman alone:
-
-      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install-from-release.sh | bash"
+	files=()
+	for u in "${WANT_URLS[@]}"; do files+=("$TMP/${u##*/}"); done
+	$SUDO pacman -U --needed --noconfirm "${files[@]}" \
+		|| die "pacman failed to install the packages.
+    If it reports missing dependencies, steamos-manager and inputplumber come
+    from the CachyOS repos -- check they are enabled in /etc/pacman.conf."
 fi
 
 # --- services ---------------------------------------------------------------
@@ -233,7 +360,14 @@ fi
 # "and now it works" entry point.
 say "Starting services"
 run systemctl daemon-reload
-run systemctl enable --now oxp-tdpd
+# The modules were just built by DKMS; nothing has loaded them yet this boot.
+run modprobe ryzen_smu 2>/dev/null || warn "ryzen_smu did not load -- check 'dkms status' and 'dmesg | grep ryzen_smu'"
+run modprobe -r oxpec 2>/dev/null || true
+run modprobe oxpec 2>/dev/null || warn "oxpec did not load -- check 'dmesg | grep oxpec'"
+run systemctl enable oxp-tdpd
+# restart, not `enable --now`: that is a no-op on an already-running service,
+# which would silently keep the previous binary on a reinstall.
+run systemctl restart oxp-tdpd
 # steamos-manager binds remote D-Bus interfaces at startup, so it has to be
 # restarted to notice a newly registered TdpLimit1 provider -- both daemons.
 run systemctl restart steamos-manager
@@ -241,23 +375,22 @@ if [[ "$DRY_RUN" == "0" ]] && systemctl --user is-active --quiet steamos-manager
 	systemctl --user restart steamos-manager
 	note "restarted user daemon too"
 fi
-run modprobe -r oxpec 2>/dev/null || true
-run modprobe oxpec 2>/dev/null || warn "oxpec did not load -- check 'dmesg | grep oxpec'"
 [[ "$DRY_RUN" == "0" ]] && sleep 3
+
 # --- kernel parameters: tell, never touch -----------------------------------
 say "Suspend kernel parameters"
 if grep -q 'amd_iommu=off' /proc/cmdline 2>/dev/null; then
 	note "amd_iommu=off is set -- suspend should work"
 else
 	cat <<-'EOF'
-	    NOT SET. Without amd_iommu=off this machine HANGS entering s0ix and
-	    needs a forced power-off. There is no S3 fallback on this platform.
+	    NOT SET. On Linux 7.1 this machine HUNG entering s0ix without
+	    amd_iommu=off and needed a forced power-off. There is no S3 fallback.
+	    Test suspend before relying on it (docs/suspend.md); if it hangs, add:
 
 	        amd_iommu=off mem_sleep_default=s2idle
 
 	    The cost: the NPU stops working entirely (amdxdna requires IOMMU) and
-	    DMA remapping is gone, which matters if you use Thunderbolt. If you
-	    need the NPU, do not set this and do not suspend.
+	    DMA remapping is gone, which matters if you use Thunderbolt.
 
 	    This script will not edit your bootloader. Add it yourself:
 	EOF
@@ -277,9 +410,9 @@ fi
 [[ "$DRY_RUN" == "1" ]] && { say "Dry run complete"; exit 0; }
 
 say "Result"
-printf '%-16s %s\n' "inputplumber:"    "$(systemctl is-active inputplumber 2>/dev/null || echo inactive)"
-printf '%-16s %s\n' "oxp-tdpd:"        "$(systemctl is-active oxp-tdpd 2>/dev/null || echo inactive)"
-printf '%-16s %s\n' "steamos-manager:" "$(systemctl is-active steamos-manager 2>/dev/null || echo inactive)"
+for u in inputplumber oxp-tdpd steamos-manager oxp-x2mini-paddles; do
+	printf '%-20s %s\n' "$u:" "$(systemctl is-active "$u" 2>/dev/null || true)"
+done
 echo
 steamosctl get-device-model 2>&1 || true
 
@@ -309,4 +442,4 @@ else
 fi
 
 say "Done"
-note "Reboot is not required. HDR takes effect on the next game-mode session."
+note "Reboot is not required."

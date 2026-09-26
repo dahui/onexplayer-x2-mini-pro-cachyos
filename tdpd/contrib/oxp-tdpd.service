@@ -1,10 +1,12 @@
 [Unit]
 Description=OneXPlayer TDP daemon (steamos-manager TdpLimit1 remote)
 Documentation=https://github.com/dahui/onexplayer-x2-mini-pro-cachyos/blob/main/docs/tdpd.md
-After=dbus.service
+After=dbus.service systemd-modules-load.service
 Requires=dbus.service
 # The SMU mailbox lives in the ryzen_smu module's sysfs; without it the daemon
 # exits immediately with a clear error rather than serving a dead interface.
+# A condition is evaluated once, so the module must be loaded before this is
+# checked -- /usr/lib/modules-load.d/oxp-tdpd.conf plus the After= above.
 ConditionPathExists=/sys/kernel/ryzen_smu_drv/mp1_smu_cmd
 
 [Service]

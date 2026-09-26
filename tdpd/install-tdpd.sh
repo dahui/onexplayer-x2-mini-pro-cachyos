@@ -9,6 +9,7 @@
 #   sudo systemctl disable --now oxp-tdpd
 #   sudo rm -f /usr/bin/oxp-tdpd \
 #              /etc/systemd/system/oxp-tdpd.service \
+#              /etc/modules-load.d/oxp-tdpd.conf \
 #              /etc/steamos-manager/remotes.d/oxp-tdpd.toml \
 #              /usr/share/dbus-1/system.d/io.aletheia.OxpTdp1.conf
 #   sudo systemctl daemon-reload && sudo systemctl restart steamos-manager
@@ -38,7 +39,8 @@ if [[ -e /sys/kernel/ryzen_smu_drv/pm_table ]]; then
 	note "PM table available - read-back will report real hardware state"
 else
 	note "WARNING: no PM table. Read-back will fall back to the last applied value."
-	note "         See ../ryzen-smu/ for the patch adding this firmware's table version."
+	note "         ryzen_smu is too old for this firmware's table (0x64010C); update"
+	note "         ryzen_smu-dkms-git -- support is upstream since amkillam/ryzen_smu@b098884."
 fi
 
 # --- build -----------------------------------------------------------------
@@ -67,6 +69,10 @@ note "/usr/share/dbus-1/system.d/io.aletheia.OxpTdp1.conf"
 $SUDO install -Dm644 "$SRC/contrib/oxp-tdpd.service" \
 	/etc/systemd/system/oxp-tdpd.service
 note "/etc/systemd/system/oxp-tdpd.service"
+
+$SUDO install -Dm644 "$SRC/contrib/modules-load.d/oxp-tdpd.conf" \
+	/etc/modules-load.d/oxp-tdpd.conf
+note "/etc/modules-load.d/oxp-tdpd.conf"
 
 # Never clobber an edited config.
 if [[ -e /etc/oxp-tdpd.conf ]]; then

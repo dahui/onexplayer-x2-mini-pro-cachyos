@@ -1,0 +1,8 @@
+# ONEXPLAYER X2Mini PRO: start the paddle watcher when hid-oxp binds the
+# controller's vendor interface -- the one exposing button_m1. See
+# /usr/lib/onexplayer-x2mini/paddle-watch for why it is needed.
+#
+# "add" as well as "bind": coldplug at boot replays add events with the driver
+# already bound, while a hotplug add arrives before the driver and only the
+# following bind matches. Starting an already-running unit is a no-op.
+ACTION=="add|bind", SUBSYSTEM=="hid", DRIVER=="hid-oxp", TEST=="button_m1", RUN+="/usr/bin/systemctl --no-block start oxp-x2mini-paddles.service"

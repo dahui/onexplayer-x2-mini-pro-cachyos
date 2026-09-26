@@ -37,9 +37,11 @@ Steam ──D-Bus──▶ steamos-manager (user daemon)
 ./tdpd/install-tdpd.sh
 ```
 
-Requires the `ryzen_smu` module (amkillam fork) and, for read-back, the PM table
-patch in [`packaging/ryzen-smu-x2mini-dkms/`](ryzen-smu.md). The installer checks both and warns
-rather than failing if the PM table is missing.
+Requires the `ryzen_smu` module: `ryzen_smu-dkms-git` from the AUR, the amkillam
+fork. Every limit is written through its mailbox, so it is not optional. It
+carries this firmware's PM table (`0x64010C`) upstream since `b098884`, so
+read-back works with no patch; see [ryzen-smu.md](ryzen-smu.md). The installer
+refuses to run without the module and warns if the PM table is missing.
 
 It builds the binary, installs the systemd unit, D-Bus policy and remotes.d
 registration, then restarts steamos-manager so it notices the new remote.

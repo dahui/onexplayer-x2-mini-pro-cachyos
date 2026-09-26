@@ -4,8 +4,9 @@
 #
 # Publish packages to the AUR.
 #
-# Run by .github/workflows/aur.yml after a release is published, and usable by
-# hand for a dry run:
+# CURRENTLY UNUSED: releases ship on the GitHub release page only, and
+# .github/workflows/aur.yml no longer runs automatically. Kept so AUR publishing
+# can be revived. Usable by hand for a dry run:
 #
 #   ./packaging/aur-publish.sh --version 0.1.0 --dry-run
 #   ./packaging/aur-publish.sh --version 0.1.0 --only oxp-tdpd-bin
@@ -24,13 +25,8 @@ VERSION=""
 DRY_RUN=0
 ONLY=""
 
-# Dependency order, leaves first.
-#
-# ryzen-smu-x2mini-dkms is deliberately ABSENT. It forks an existing AUR package
-# (ryzen_smu-dkms-git) and exists only until our patch is upstreamed. Putting a
-# short-lived fork of someone else's package into the AUR namespace is exactly
-# the thing that quietly becomes permanent, so it ships as a prebuilt package on
-# the GitHub release instead and install.sh builds it from the checkout.
+# Dependency order, leaves first. (oxp-tdpd-bin's ryzen_smu-dkms dependency is
+# ryzen_smu-dkms-git, already on the AUR and not ours.)
 PACKAGES=(
 	oxpec-x2mini-dkms
 	oxp-tdpd-bin
@@ -199,9 +195,9 @@ for pkg in "${PACKAGES[@]}"; do
 	updpkgsums 2>&1 | sed 's/^/      /'
 
 	# AUR rejects SKIP for anything that is not a VCS source. Count rather than
-	# just checking for presence: ryzen-smu-x2mini-dkms has both a tarball and a
-	# pinned git source, so "has a git+ source somewhere" would wave through a
-	# tarball whose checksum never got computed.
+	# just checking for presence: a package with both a tarball and a git source
+	# would otherwise pass on "has a git+ source somewhere" with a tarball whose
+	# checksum never got computed.
 	skips=$(grep -coE "'SKIP'" PKGBUILD || true)
 	vcs=$(grep -cE "^[[:space:]]*[\"']?[a-zA-Z_-]*::(git|hg|svn|bzr)\+|(git|hg|svn|bzr)\+https?://" PKGBUILD || true)
 	if (( skips > vcs )); then

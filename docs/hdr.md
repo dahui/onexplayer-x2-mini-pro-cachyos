@@ -1,6 +1,39 @@
 # HDR and brightness in Steam game mode
 
-## HDR — working, confirmed with a real title
+## Now upstream: nothing to install (gamescope 3.16.30)
+
+gamescope 3.16.30 ships `lenovo.legiongo2.oled.lua`, and the Legion Go 2 uses
+this machine's panel. Its `matches` function is the same test ours used: EDID
+vendor `SDC`, product `0x4301`, priority 5000. On a fresh CachyOS install, with
+none of this repo's files present:
+
+```
+drm: Connector eDP-1 -> SDC - AMS881KB01-0
+drm: Got known display: lenovo_legiongo2_oled (Lenovo Legion Go 2 OLED)
+```
+
+The upstream entry is also the better one:
+
+- it takes luminance and colorimetry from the panel's EDID
+- it sets `software_backlight`, because the panel ignores hardware backlight in PQ mode
+- it adds dynamic refresh from 48 to 144 Hz
+
+Its 144 Hz front porch (56 lines) matches this panel's EDID timing exactly.
+
+**So our display script was removed.** It was not only redundant but harmful:
+both entries score 5000 against the same EDID, so which one gamescope picked
+was not deterministic. Upgrading `onexplayer-x2mini` deletes
+`/etc/gamescope/scripts/onexplayer.x2mini.oled.lua`.
+
+Still to confirm on the new setup: HDR engaging in a real title
+(`GAMESCOPE_HDR_OUTPUT_FEEDBACK = 1`), and that brightness still works (see
+[below](#why-it-started-working-is-not-proven)). The pretty name in logs and
+Steam now reads "Lenovo Legion Go 2 OLED", which is cosmetic.
+
+Everything below is the history of how HDR was enabled before that entry
+existed, and still explains the mechanism.
+
+## HDR — working, confirmed with a real title (with our former script)
 
 Verified in game mode on Like a Dragon: Infinite Wealth:
 
@@ -155,20 +188,11 @@ screen. An empty blob with nothing HDR running is expected, not a fault. The rea
 test is launching an HDR-capable game and re-checking
 `GAMESCOPE_HDR_OUTPUT_FEEDBACK`.
 
-### Applying it
+### Applying it (historical)
 
-```bash
-./install.sh                       # or just the one file:
-sudo install -Dm644 etc/gamescope/scripts/onexplayer.x2mini.oled.lua \
-    /etc/gamescope/scripts/onexplayer.x2mini.oled.lua
-```
-
-Takes effect on the next game-mode session. Nothing needs restarting from the
-desktop, and there is no session script to keep in sync.
-
-`/etc/gamescope/scripts` is scanned after gamescope's bundled directory, so this
-survives gamescope updates — including `gamescope-session-cachyos` updates, which
-used to require re-running an installer.
+The script was installed to `/etc/gamescope/scripts/`, which gamescope scans
+after its bundled directory, so it survived gamescope updates. It is no longer
+shipped: see the top of this page.
 
 ### Verifying
 
@@ -223,6 +247,11 @@ happened in the same window, and the session was restarted. Testing it would
 mean removing `/etc/gamescope/scripts/onexplayer.x2mini.oled.lua`, restarting
 the session and seeing whether brightness breaks again — worth doing only if it
 regresses.
+
+That script is gone now, but the theory survives it: gamescope's bundled Legion
+Go 2 entry produces a known display just the same, so if the EDID explanation is
+right, brightness keeps working. If brightness breaks on a fresh install, this
+is the first place to look.
 
 ### What was ruled out earlier, and is still true
 

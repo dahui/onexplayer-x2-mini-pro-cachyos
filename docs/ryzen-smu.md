@@ -1,6 +1,34 @@
 # ryzen_smu PM table support for the X2Mini PRO
 
-**Status: patched, rebuilt, working.**
+**Status: upstream. Install `ryzen_smu-dkms-git` from the AUR; no patch needed.**
+
+The patch below was merged verbatim as
+[amkillam/ryzen_smu@b098884](https://github.com/amkillam/ryzen_smu/commit/b0988849ddfd6701c67b8b485d79dbdb02c2bd3a)
+("smu: add Strix Halo PM table version 0x64010C", 2026-08-15). The AUR package
+`ryzen_smu-dkms-git` builds amkillam HEAD, so it includes the patch, and also
+[`d298366`](https://github.com/amkillam/ryzen_smu/commit/d2983668300dd2a598e5a7dc40e71ce0678cc270),
+which fixes the build on Linux 7.2 (`cpuid_eax` undefined).
+
+This repo's patched fork, `ryzen-smu-x2mini-dkms`, is therefore gone. It pinned a
+commit from before the 7.2 fix, so on 7.2 it was not just redundant but **failed
+to build** (upstream issue #51). `install.sh` removes it if present and installs
+`ryzen_smu-dkms-git` instead.
+
+**ryzen_smu is a hard requirement for oxp-tdpd**, for writes as well as
+read-back. The daemon's only transport is the module's sysfs mailbox.
+The table further down is about *ryzenadj*, which has other paths; it does not
+apply to oxp-tdpd.
+
+```bash
+paru -S ryzen_smu-dkms-git      # or let install.sh do it
+```
+
+The module autoloads through its PCI table (root complex `1022:1507`), and
+`oxp-tdpd-bin` also lists it in `modules-load.d`, so it is loaded before the
+daemon starts.
+
+The rest of this page is the original investigation, kept because the
+validation method applies again if a firmware update changes the table version.
 
 ## Why
 
@@ -26,7 +54,7 @@ things break as a result:
   module loaded* case; see below, because it is worse than not having the module
   at all.
 
-## Do I actually need this patch?
+## Did ryzenadj need the patch? (historical)
 
 Short answer: **only for read-back — but leaving the module unpatched is worse
 than not installing it.** Writing TDP limits never touches the PM table.
@@ -144,35 +172,13 @@ through the MP1 mailbox and read back from the table:
 All three land exactly where RyzenAdj's documented layout says they should, and
 `ryzenadj -i` independently reports the same values once the patch is in.
 
-## Install
+## Upstreaming — done
 
-```bash
-cd packaging/ryzen-smu-x2mini-dkms && makepkg -si
-```
-
-Idempotent — detects an already-patched tree. Requires `ryzen_smu-dkms-git`
-(the **amkillam** fork; the leogx9r one has no Strix Halo support at all).
-
-### This does not survive package updates
-
-The patch is applied to the AUR package's source in `/usr/src/ryzen_smu-*`, so a
-`ryzen_smu-dkms-git` cannot revert it any more: the package carries conflicts=() against it.
-`oxp-tdpd` degrades gracefully if that is forgotten — it logs a warning and
-falls back to cached read-back rather than failing.
-
-## Upstreaming
-
-`0001-ryzen_smu-add-pm-table-0x64010C.patch` is formatted for `git am` with a
-`Signed-off-by`, and is worth sending to
-[amkillam/ryzen_smu](https://github.com/amkillam/ryzen_smu). It benefits every
-tool on this hardware, not just ours: with the module installed but unpatched,
-ryzenadj fails at init and cannot even apply limits — see "Do I actually need
-this patch?" above.
-
-If a firmware update changes the table version again, the symptom is the same
-`Unknown PM table version` line in `dmesg`. Adding the new version alongside
-`0x64010C` with the same size is very likely all that is needed; verify with the
-write-then-read-back method above before trusting it.
+Merged as `b098884`. If a firmware update changes the table version again, the
+symptom is the same `Unknown PM table version` line in `dmesg`. Adding the new
+version alongside `0x64010C` with the same size is very likely all that is
+needed. Verify with the write-then-read-back method above before trusting it,
+and send it upstream the same way.
 
 ## Verifying by hand
 

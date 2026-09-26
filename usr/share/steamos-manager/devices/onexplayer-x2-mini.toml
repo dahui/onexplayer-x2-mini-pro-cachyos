@@ -18,7 +18,8 @@ platform_profile_name = "amd-pmf"
 suggested_default = "balanced"
 
 # Battery charge limit via the ACPI battery hook that oxpec registers.
-# REQUIRES the patched oxpec driver (see oxpec/ in this repo) - without it
+# REQUIRES oxpec with this machine's DMI entry: in-tree from Linux 7.3, and
+# oxpec-x2mini-dkms before that. Without it
 # /sys/class/power_supply/BATT/charge_control_end_threshold does not exist and
 # this section is inert.
 [battery_charge_limit]
@@ -30,8 +31,8 @@ method = "acpi_sb"
 # driver provides it). oxp-tdpd applies limits over the SMU mailbox instead.
 #
 # Registered in /etc/steamos-manager/remotes.d/oxp-tdpd.toml. Range matches what
-# OneXConsole offers. REQUIRES tdpd/ to be installed - without it steamos-manager
-# reports "No remote TDP manager".
+# OneXConsole offers. REQUIRES oxp-tdpd (and through it ryzen_smu-dkms-git) -
+# without it steamos-manager reports "No remote TDP manager".
 [tdp_limit]
 method = "remote_interface"
 

@@ -1,36 +1,29 @@
 # Packaging
 
-Four packages. `makepkg -si` in any of these directories installs it locally.
+Three packages. `makepkg -si` in any of these directories installs it locally.
 
-**Every one of them is attached to each GitHub release**, and three of the four
-also go to the AUR via [`aur-publish.sh`](aur-publish.sh), driven by
-[`../.github/workflows/aur.yml`](../.github/workflows/aur.yml) automatically
-after a successful release. The fourth deliberately does not — see below.
-
-Two channels rather than one is not redundancy for its own sake. The AUR has
-extended outages, and a package set where three of four come from a channel that
-is down is not installable at all. `install.sh` uses the AUR;
-[`install-from-release.sh`](../install-from-release.sh) uses the release page
-and needs no AUR helper. The packages are the same either way — CI builds
-`oxp-tdpd-bin` and `onexplayer-x2mini` by fetching the very release artifacts an
-AUR build fetches, so that build doubles as a smoke test of the AUR path.
+**The GitHub release page is the only distribution channel.** Every package is
+attached to each release, and [`install.sh`](../install.sh) downloads them,
+verifies them against `SHA256SUMS`, and installs them with pacman. Nothing is
+published to the AUR (see [below](#aur-publishing-disabled)).
 
 ## The package set
 
-Listed in dependency order — **leaves first**, because the AUR cannot resolve a
-dependency that has not been published yet.
+| Package | What it ships |
+|---|---|
+| `oxpec-x2mini-dkms` | Patched EC driver source + `dkms.conf`, for kernels before 7.3 |
+| `oxp-tdpd-bin` | Prebuilt daemon, unit, D-Bus policy, `remotes.d`, `modules-load.d` |
+| `onexplayer-x2mini` | steamos-manager, InputPlumber and hwdb configs, the paddle watcher |
 
-| Package | What it ships | Distribution |
-|---|---|---|
-| `oxpec-x2mini-dkms` | Patched EC driver source + `dkms.conf` | AUR + release |
-| `ryzen-smu-x2mini-dkms` | ryzen_smu + the PM table `0x64010C` patch | **Release only — never the AUR.** See below. |
-| `oxp-tdpd-bin` | Prebuilt daemon, unit, D-Bus policy, `remotes.d` | AUR + release |
-| `onexplayer-x2mini` | steamos-manager, InputPlumber, hwdb and gamescope configs | AUR + release |
+Plus one dependency from the AUR, which is neither ours nor in the CachyOS repos:
 
-Both DKMS packages are `arch=any` and ship **source only** — the user's machine
+| | |
+|---|---|
+| `ryzen_smu-dkms-git` | The amkillam ryzen_smu fork. Carries this device's PM table since `b098884`, so the patched fork this repo used to ship (`ryzen-smu-x2mini-dkms`) is gone. `install.sh` installs it with an AUR helper, or builds it with makepkg if the user agrees. |
+
+The DKMS package is `arch=any` and ships **source only**: the user's machine
 compiles the module against its own kernel. That is what makes a CI-built
-`.pkg.tar.zst` portable to any Arch install, and why the release page is a
-viable distribution channel rather than a second-class one.
+`.pkg.tar.zst` portable to any Arch install.
 
 ### Dependencies pull their own weight
 
@@ -41,98 +34,48 @@ and those files are inert without the daemon that reads them. Left optional, a
 fresh install would lay the configs down correctly and the buttons or the TDP
 slider would simply do nothing, with no error anywhere.
 
-Two things stay optional, for reasons rather than by omission:
+`ryzen_smu-dkms` is a **hard** dependency of `oxp-tdpd-bin` for the same reason:
+every TDP command goes through its sysfs mailbox, not just read-back. The daemon
+has no other transport. `ryzen_smu-dkms-git` satisfies it through `provides=`.
+Because pacman cannot fetch that from the AUR, `install.sh` installs it before
+the release packages.
 
-- **`ryzen-smu-x2mini-dkms`** cannot be a hard dependency — it is not on the AUR
-  (see below), so the reference would be unresolvable. TDP *control* works
-  without it; only read-back falls back to a cached value.
-- **`gamescope`** is left optional so this package does not drag a compositor
-  onto a non-gaming install. The display script is inert without it, and
-  harmless.
+**Kernel headers are not a dependency**, following the usual DKMS convention:
+the right package depends on which kernel is installed. `install.sh` resolves
+them, and the DKMS package checks at install time and prints the exact command,
+because the failure mode is otherwise silent. Without headers the module never
+builds and the feature just does not work.
 
-**Kernel headers are not a dependency either**, following the usual DKMS
-convention — the right package depends on which kernel is installed. Both DKMS
-packages instead check at install time and print the exact command, because the
-failure mode is otherwise silent: no headers means the module never builds and
-the feature just does not work.
+`gamescope` is no longer referenced at all. HDR comes from gamescope's own
+bundled display entry for this panel (see [docs/hdr.md](../docs/hdr.md)).
 
-Note `depends=('oxp-tdpd')` is satisfied by `oxp-tdpd-bin` through
-`provides=`. AUR helpers resolve that; bare `makepkg` does not, which is
-expected and fine.
+Note `depends=('oxp-tdpd')` is satisfied by `oxp-tdpd-bin` through `provides=`.
+pacman resolves that when both are in one `pacman -U` transaction, which is how
+`install.sh` installs them.
 
 ### Package names differ from upstream; module names must not
 
-`oxpec-x2mini-dkms` builds `oxpec.ko`, and `ryzen-smu-x2mini-dkms` builds
-`ryzen_smu.ko`. The **module** names have to stay as they are — they bind the
-hardware and are what `modprobe`, `ryzenadj` and `oxp-tdpd` look for. Only the
-*package* names are namespaced, so they never collide with upstream. Do not
-"fix" the mismatch.
+`oxpec-x2mini-dkms` builds `oxpec.ko`. The **module** name has to stay as it
+is: it is what binds the hardware and what `modprobe` looks for. Only the
+*package* name is namespaced, so it never collides with upstream. Do not "fix"
+the mismatch.
 
-### `ryzen-smu-x2mini-dkms` never goes to the AUR
+### `oxpec-x2mini-dkms` retires itself at 7.3
 
-It exists for one line: `conflicts=('ryzen_smu-dkms-git')`. Our patch used to be
-applied directly to that package's `/usr/src` tree, and every package update
-silently reverted it — leaving a loaded-but-unpatched `ryzen_smu`, which breaks
-ryzenadj entirely with an error that reads like a permissions problem.
-
-It is the only package here that **forks an existing AUR package**, and it is
-meant to disappear once the patch reaches
-[amkillam/ryzen_smu](https://github.com/amkillam/ryzen_smu). A short-lived fork
-of someone else's package, sitting in a shared namespace, is precisely the thing
-that quietly becomes permanent — so it is distributed on the GitHub release page
-instead, where it can simply stop being built.
-
-Users lose nothing: both install scripts fetch it from the release page and
-checksum-verify it, and it is still a real pacman package, so the `conflicts`
-protection and clean removal work exactly as they would from the AUR.
-
-That `conflicts` line does need handling at install time, though. pacman asks
-before removing a conflicting package and **that prompt defaults to no**
-(`callback.c` uses `noyes` for `ALPM_QUESTION_CONFLICT_PKG`), so under
-`--noconfirm` a machine with `ryzen_smu-dkms-git` installed would abort the whole
-transaction with "unresolvable package conflicts detected". Both scripts remove
-it explicitly first, where the reason can be printed.
-
-`oxpec-x2mini-dkms` is a different case and is fine on the AUR — it forks
-nothing, being a DKMS build of an *in-kernel* driver with one DMI ID added, which
-is a routine AUR pattern.
-
-## One-time AUR setup
-
-1. **Create an AUR account** at <https://aur.archlinux.org>.
-
-2. **Check the three names are free.** The AUR RPC sits behind bot protection, so
-   check by hand:
-   ```
-   https://aur.archlinux.org/packages?K=oxp-tdpd-bin
-   ```
-   Repeat for `oxpec-x2mini-dkms` and `onexplayer-x2mini`. A name already taken
-   by someone else means renaming here first — the push would otherwise be
-   rejected. (`ryzen-smu-x2mini-dkms` does not need checking; it never goes to
-   the AUR.)
-
-3. **Generate a dedicated CI key.** Not your personal SSH key:
-   ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/aur-ci -C "aur-ci onexplayer-x2mini" -N ""
-   ```
-
-4. **Add the public half** (`~/.ssh/aur-ci.pub`) to your AUR account under
-   *My Account → SSH Public Key*.
-
-5. **Add the private half** as a GitHub repository secret named
-   `AUR_SSH_PRIVATE_KEY` (Settings → Secrets and variables → Actions). Paste the
-   whole file including the trailing newline.
-
-6. **Optionally** set repository *variables* `AUR_USERNAME` and `AUR_EMAIL` for
-   the commit author. They default to the maintainer line in the PKGBUILDs.
-
-You do not need to create the AUR repositories by hand — the AUR creates one on
-the first push of a valid `PKGBUILD` + `.SRCINFO`, which the script handles.
+The DMI entry it adds is in mainline from v7.3-rc1. `dkms.conf` restricts the
+build to kernels before 7.3 with `BUILD_EXCLUSIVE_KERNEL`, so on 7.3+ DKMS skips
+it and the in-tree oxpec binds. Otherwise the `/updates` copy would keep
+shadowing the in-tree driver. Delete the package once 7.3 is the oldest kernel
+in use.
 
 ## Publishing
 
-**Automatic.** Pushing a `v*` tag runs `release.yml`, and `aur.yml` fires when
-that completes successfully, publishing all three packages.
+**Automatic.** Pushing a `v*` tag runs `release.yml`, which builds everything and
+attaches it to the release. Re-running a release without re-pushing the tag:
+
+```bash
+gh workflow run release.yml --ref vX.Y.Z
+```
 
 ### `release.yml` publishes in two passes, and the order is load-bearing
 
@@ -141,115 +84,44 @@ that completes successfully, publishing all three packages.
 be built. A draft release does not expose assets at the public download path, so
 the release has to be genuinely published in between:
 
-1. Build the binary, the source tarball and the two self-contained DKMS
-   packages; publish them — **without `SHA256SUMS`**.
+1. Build the binary, the source tarball and the self-contained DKMS package;
+   publish them — **without `SHA256SUMS`**.
 2. Poll until the assets are actually downloadable, build the two
    release-sourced packages against the live release, then publish those plus a
    `SHA256SUMS` covering everything.
 
 `SHA256SUMS` is withheld until the end deliberately. A checksum file listing only
-some assets is worse than no file at all: both install scripts verify against it,
+some assets is worse than no file at all: `install.sh` verifies against it,
 and a missing line would have to be told apart from a real mismatch. If the job
-dies between the passes the release simply has no `SHA256SUMS`, and both scripts
-refuse to install rather than installing something unverified.
+dies between the passes the release simply has no `SHA256SUMS`, and the script
+refuses to install rather than installing something unverified.
 
-### Why the trigger is `workflow_run` and not `release: published`
+### `pkgver` is stamped from the tag
 
-The obvious trigger does not work. **GitHub does not start workflows from events
-created with `GITHUB_TOKEN`**, so a release published by our own `release.yml`
-never fires a `release` trigger — v0.1.0 demonstrated this by silently doing
-nothing at all. `workflow_run` keys off the upstream workflow *completing*,
-which is not subject to that restriction.
-
-It checks out `workflow_run.head_sha` rather than the default branch, so the
-PKGBUILDs and their local sources match the artifacts being hashed, and it only
-runs when the release actually succeeded and the ref was a tag.
-
-### Rehearsing
-
-To rehearse — worth doing at least once — use the manual trigger with **dry run**
-left on, or run it locally on any Arch box:
-
-```bash
-./packaging/aur-publish.sh --version 0.1.0 --dry-run
-./packaging/aur-publish.sh --version 0.1.0 --only oxp-tdpd-bin   # one package
-```
-
-For each package the script sets `pkgver` from the tag, derives `pkgrel`, runs
-`updpkgsums`, regenerates `.SRCINFO`, verifies the sources, then commits and
-pushes.
-
-### `pkgrel` is derived, not committed
-
-`pkgrel` is 1 for a new `pkgver`, and one past whatever the AUR already
-publishes otherwise. This matters for the most likely reason to republish at
-all: **fixing a PKGBUILD without changing the version.** Pushed at an unchanged
-`pkgver-pkgrel`, the corrected file lands in the AUR git repo and no user ever
-receives it, because pacman upgrades on the version string and that did not
-move. A silent no-op.
-
-z13ctl derives this from the AUR RPC. Here it is read from the cloned AUR repo
-instead — no `jq` dependency, still correct while the RPC is down, and
-authoritative, since it is the very file about to be replaced. The clone
-therefore happens *before* `.SRCINFO` is generated, which has to carry the final
-value.
-
-### Retries, because AUR git is brittle
-
-Maintenance windows and transient refusals are routine — the first real v0.1.0
-push hit one. Following the same ramp as z13ctl's release pipeline: 10s, then
-+5s per attempt, capped at 30s.
-
-| Operation | Attempts | Why |
-|---|---|---|
-| reachability probe | 100 (~50 min) | waits out a maintenance window |
-| `git push` | 100 (~50 min) | the step that must not be lost |
-| `git clone` | 5 (~1 min) | for a package with no AUR repo yet this **always** fails, and that is the normal first-publish path — a long retry would stall every new package for an hour before doing the right thing anyway |
-
-**A rejected SSH key is not retried.** No amount of waiting fixes a key the AUR
-will not accept, so that fails immediately with what to check.
-
-The reachability probe runs once, before any package is processed, so an outage
-means nothing is pushed at all rather than leaving one package published and two
-not. If a push still fails after all attempts, the script says which packages
-already went out and how to resume:
-`./packaging/aur-publish.sh --version X --only <pkg>`.
-
-### Why this cannot run before the release exists
-
-`oxp-tdpd-bin` and `onexplayer-x2mini` hash the release tarball and the prebuilt
-binary, so `updpkgsums` downloads them. Running against an unpublished tag fails
-with a plain 404:
-
-```
--> Downloading onexplayer-x2-mini-pro-cachyos-0.1.0.tar.gz...
-curl: (22) The requested URL returned error: 404
-```
-
-That is why `aur.yml` triggers on `release: published` rather than on the tag.
+The committed PKGBUILDs carry whatever `pkgver` was last written; `release.yml`
+rewrites it from the tag before building. Without that, the two release-sourced
+packages would fetch the *previous* release's artifacts. v0.1.1 shipped an
+`oxp-tdpd-bin` containing v0.1.0's binary exactly that way.
 
 ### `SKIP` checksums
 
-**The AUR rejects `SKIP` for anything that is not a VCS source.** The two
-release-sourced PKGBUILDs (`oxp-tdpd-bin`, `onexplayer-x2mini`) carry `SKIP` as a
-placeholder because the artifacts they hash do not exist until a release is cut;
-`aur-publish.sh` replaces them and refuses to push if any survive that are not
-backed by a `git+` source — counted, not merely detected, so a tarball cannot
-hide behind a package's unrelated git source.
+The two release-sourced PKGBUILDs (`oxp-tdpd-bin`, `onexplayer-x2mini`) carry
+`SKIP` because the artifacts they hash do not exist until a release is cut. The
+self-contained `oxpec-x2mini-dkms` carries real checksums, and CI rebuilds it on
+every push, so a source edit without `updpkgsums` fails there first.
 
-The two self-contained packages already carry real checksums, because their
-sources sit next to the PKGBUILD. The one permanent, legitimate `SKIP` is the
-pinned upstream git source in `ryzen-smu-x2mini-dkms`.
+## AUR publishing (disabled)
 
-## Release order
+Earlier plans published these packages to the AUR too. The AUR was down for the
+whole of this project's development and nothing was ever pushed, so it has been
+disabled rather than half-maintained:
 
-```
-git tag v0.1.1 && git push origin v0.1.1
-  └─ release.yml   oxp-tdpd (static) + both DKMS .pkg.tar.zst
-                   + source tarball + SHA256SUMS
-       └─ aur.yml  (workflow_run, automatic) hashes those artifacts and
-                   pushes 3 packages to the AUR
-                   ryzen-smu-x2mini-dkms stays on the release page
-```
+- `.github/workflows/aur.yml` has no automatic trigger any more and runs only
+  when dispatched by hand. Its header explains how to restore the trigger.
+- `aur-publish.sh` is kept for reference. It derives `pkgrel`, replaces `SKIP`
+  checksums, generates `.SRCINFO`, and retries around AUR maintenance windows.
+  The comments in the script cover the details.
 
-Nothing else is needed for a release: tag, and the rest follows.
+If this is ever revived, publish leaves first (`oxpec-x2mini-dkms`,
+`oxp-tdpd-bin`, then `onexplayer-x2mini`); the AUR cannot resolve a dependency
+that has not been published yet.

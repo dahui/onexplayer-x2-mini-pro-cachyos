@@ -1,20 +1,22 @@
 name: Publish to AUR
 
-# Runs automatically after a successful Release, and never on the tag directly:
-# the PKGBUILDs hash the release artifacts, so those must already be uploaded.
+# DISABLED. Releases ship as pacman packages on the GitHub release page, and
+# install.sh installs them from there; nothing has been published to the AUR.
+# The automatic trigger after each Release has been removed, so this only runs
+# when dispatched by hand. Kept, with aur-publish.sh, so it can be revived.
 #
-# The trigger is `workflow_run`, NOT `release: published`. GitHub deliberately
-# does not start workflows from events created with GITHUB_TOKEN, so a release
-# published by our own release.yml never fires a `release` trigger -- v0.1.0
-# proved that by silently doing nothing. `workflow_run` keys off the upstream
-# workflow completing instead, which is not subject to that restriction.
+# If it is ever re-enabled, restore the trigger below -- `workflow_run`, NOT
+# `release: published`. GitHub does not start workflows from events created
+# with GITHUB_TOKEN, so a release published by our own release.yml never fires
+# a `release` trigger; `workflow_run` keys off the upstream workflow completing
+# instead:
 #
-# Keeping this separate from release.yml means a failed AUR push can be re-run
-# on its own without rebuilding the release.
+#   workflow_run:
+#     workflows: ["Release"]
+#     types: [completed]
+#
+# The PKGBUILDs hash the release artifacts, so this must run after they exist.
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       version:

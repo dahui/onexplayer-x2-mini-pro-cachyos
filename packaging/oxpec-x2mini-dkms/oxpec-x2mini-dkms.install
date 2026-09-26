@@ -28,6 +28,8 @@ _check_headers() {
 post_install() {
 	_check_headers
 	echo "==> oxpec builds against the running kernel and rebuilds on kernel updates."
+	echo "    Kernels 7.3 and later are skipped on purpose: their in-tree oxpec"
+	echo "    already supports this machine."
 	echo "    Load it now with: sudo modprobe oxpec"
 }
 

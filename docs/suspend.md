@@ -84,10 +84,10 @@ else here depends on it.
 ### Getting both back
 
 The only route is a kernel that fixes s0ix entry on Strix Halo without the
-workaround. **Linux 7.2 is the next one to try** — it had not shipped in CachyOS
-as of 2026-08-04, and this unit runs `7.1.6-1-cachyos-deckify`. Nothing promises
-7.2 fixes this; it is worth testing because it is cheap and reversible, not
-because it is expected.
+workaround. **Linux 7.2 has shipped in CachyOS** (`7.2.3-1-cachyos-deckify`) and
+is the next one to test. That test has not been run yet. Nothing promises 7.2
+fixes this; it is worth testing because it is cheap and reversible, not because
+it is expected.
 
 Re-test after any major kernel bump:
 
@@ -99,8 +99,13 @@ sudo ./suspend/suspend-test.sh ladder     # then `none` for the real thing
 
 If the ladder reaches `none` and survives, the IOMMU can stay on and the NPU
 comes back. If it hangs, put the parameter back — you will have lost nothing but
-a reboot. Note 7.2 is also what the **back paddles** and **RGB lighting** are
-waiting on (`hid-oxp`), so it is worth testing all of it at once.
+a reboot.
+
+On 7.2, also check the back paddles after the real `none` resume. hid-oxp
+re-initialises the controller about 6 s after wake, and that init silences the
+paddles until `oxp-x2mini-paddles.service` re-arms them
+([controller.md](controller.md)). `journalctl -u oxp-x2mini-paddles` should show
+a "re-sent button map" line shortly after each resume.
 
 ## Two things that did NOT need fixing
 

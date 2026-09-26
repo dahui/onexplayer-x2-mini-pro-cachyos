@@ -1,0 +1,23 @@
+[Unit]
+Description=Keep ONEXPLAYER X2Mini PRO back paddles enabled (hid-oxp workaround)
+Documentation=https://github.com/dahui/onexplayer-x2-mini-pro-cachyos/blob/main/docs/controller.md
+# Static on purpose: 70-onexplayer-x2mini-paddles.rules starts it when hid-oxp
+# binds the controller, which covers boot (coldplug), hotplug and rebinds.
+# There is nothing to enable.
+
+[Service]
+ExecStart=/usr/lib/onexplayer-x2mini/paddle-watch
+Restart=on-failure
+RestartSec=3
+
+# Needs root for the hid-oxp sysfs write and the hidraw read, nothing else.
+# ProtectSystem=strict leaves /sys and /dev writable.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native

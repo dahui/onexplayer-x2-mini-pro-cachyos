@@ -21,13 +21,19 @@ id: oxpx2m
 #   Home           vendor HID, B2 frame, btn id 0x24  -- oxp_hid -> gamepad:Keyboard
 #   Keyboard       KeyLeftCtrl + KeyLeftMeta + KeyO
 #   OneXPlayer     KeyLeftCtrl + KeyLeftMeta + KeyLeftAlt
-#   Back paddles   nothing at all, on any interface   -- see the note at the end
+#   Left paddle    vendor HID, B2 frame, btn id 0x22  -- oxp_hid -> LeftPaddle1 (L4)
+#   Right paddle   vendor HID, B2 frame, btn id 0x23  -- oxp_hid -> RightPaddle1 (R4)
+#
+# The paddles need Linux 7.2's hid-oxp plus the paddle watcher shipped in this
+# package -- see the note at the end. They need no rule here: oxp_hid already
+# emits them as the Paddle1 pair, which deck-uhid passes through as L4/R4.
 #
 # The two chords are identical to the APEX's oxp8 map ("KB short" and "Turbo"),
 # which is expected given the shared board. What differs is that this unit has no
 # Turbo button and no Orange button, and its Home button reports over vendor HID
 # rather than as a chord -- so oxp8's Meta+G / Meta+D / Meta+Sysrq entries match
-# nothing here and its paddle entries are dead weight.
+# nothing here. oxp8 also swaps the two paddles, because 0x22 is the *right*
+# paddle on the APEX; on this unit 0x22 is the left one (captured), so no swap.
 #
 # Targets are constrained by what the steam-deck-uhid target device can express
 # (steam_deck_uhid.rs update_state). It supports Screenshot and L4/L5/R4/R5, but
@@ -64,16 +70,12 @@ mapping:
   #
   # Note this makes the Keyboard and Home buttons emit the identical event; they
   # are indistinguishable downstream. If two distinct functions are ever needed,
-  # retarget this rule to RightPaddle2 (R5) and bind that in Steam -- R5 rather
-  # than R4 so the real paddles can claim the Paddle1 slots when hid-oxp lands.
+  # retarget this rule to RightPaddle2 (R5) and bind that in Steam. R5 and not
+  # R4: the physical paddles occupy the Paddle1 slots (L4/R4), while the Paddle2
+  # slots (L5/R5) have no hardware behind them on this unit.
   #
-  # R5 is free because the physical back paddles emit nothing on this unit. R5
-  # rather than R4 deliberately: when Linux 7.2's hid-oxp makes the real paddles
-  # work they will claim the Paddle1 slots (L4/R4), so parking here avoids a
-  # future collision.
-  #
-  # Requires a one-time binding: Steam -> Controller Settings -> bind R5 to
-  # "Show Keyboard". Steam has no native keyboard-button concept for Deck
+  # That would need a one-time binding: Steam -> Controller Settings -> bind R5
+  # to "Show Keyboard". Steam has no native keyboard-button concept for Deck
   # controllers, so this is as direct as it gets short of patching the driver.
   #
   # Short press only. A long press is consumed by the firmware to toggle the
@@ -104,7 +106,7 @@ mapping:
 filtered_events: []
 
 # ---------------------------------------------------------------------------
-# The Home button is not mappable here (InputPlumber 0.78.0)
+# The Home button is not mappable here (InputPlumber 0.78.0; not re-tested on 0.81)
 #
 # Home arrives as gamepad:Keyboard from the oxp_hid driver, which hardcodes
 # vendor button id 0x24 to GamepadButton::Keyboard -- its ButtonId enum was
@@ -158,31 +160,36 @@ filtered_events: []
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Back paddles: absent by design, not by oversight
+# Back paddles: Linux 7.2 hid-oxp plus a workaround for its init order
 #
-# Neither paddle emits anything on any interface in the device's default mode.
-# They only report once the controller is put into "full intercept" mode with a
-# vendor command on the 1a86:fe00 interface-2 hidraw node:
+# On 7.1 neither paddle emitted anything in the controller's default mode. They
+# reported only in "full intercept" (debug) mode, which silences the X-Box pad.
 #
-#   enable:   B2 3F 01 03 01 02 00...00 3F B2
-#   disable:  B2 3F 01 00 01 02 00...00 3F B2
+# Linux 7.2's hid-oxp binds this controller (1a86:fe00) and, at init, sends the
+# MCU its button map (B4 frames, paddles = M1/M2) and then cycles the gamepad
+# mode debug -> xinput. That is the sequence that enables the paddles on the
+# APEX. On this unit the order is wrong: the mode switch discards the map.
+# Measured on 7.2.3 with raw HID captures (debugfs), 2026-09-26:
 #
-# (frame = [cid, 0x3F, idx] + payload + zero padding + [0x3F, cid], 64 bytes)
+#   after hid-oxp's init at boot            paddles: nothing on any interface
+#   button map re-sent afterwards           paddles: B2 0x22 (L) / 0x23 (R)
+#   hid-oxp's init runs again               paddles: nothing
+#   map re-sent again                       paddles: B2 0x22 / 0x23
+#   debug -> xinput via sysfs, watcher up   paddles: B2 0x22 / 0x23, X-Box pad live
 #
-# In that mode the paddles report as button ids 0x22 and 0x23 -- but the X-Box
-# gamepad goes completely silent, and everything (sticks, triggers, d-pad, face
-# buttons) has to be reconstructed from vendor HID. There is no mode that gives
-# paddles *and* XInput. InputPlumber 0.78's oxp_hid driver handles only four
-# button ids and has no axis support, so enabling intercept today would trade two
-# paddles for the whole controller.
+# /usr/lib/onexplayer-x2mini/paddle-watch (oxp-x2mini-paddles.service) watches
+# the vendor hidraw node for the MCU confirming a switch to xinput -- the last
+# step of every hid-oxp init, including the one the driver source runs ~6s after
+# resume (not yet observed across a real suspend) -- and re-sends
+# the map right after it. With that in place the paddles arrive here as B2
+# frames and oxp_hid turns them into LeftPaddle1 / RightPaddle1.
 #
-# The fix is upstream: hid-oxp, a Valve-authored driver merged for Linux 7.2,
-# which manages this mode properly.
+# hid-oxp maps the paddles to KEY_F16 / KEY_F17 in the MCU, but on this unit
+# that keycode is only carried inside the B2 frame (byte 9 = 0x69 / 0x6a); no
+# F16/F17 appears on the keyboard interface, so nothing leaks through as a key.
 #
-# Status as of 2026-08-04: 7.2 has NOT shipped in CachyOS. This machine runs
-# 7.1.6-1-cachyos-deckify, and a beta/mainline kernel is deliberately not a
-# prerequisite for anything in this repo. Revisit when 7.2 reaches the normal
-# CachyOS repos -- do not chase it earlier.
+# The real fix is in hid-oxp (send the map after the mode cycle for this
+# board). Notes for upstream are in docs/controller.md.
 #
 # Protocol credit: github.com/rmckayfleming/onexplayer-apex-cachyos
 # ---------------------------------------------------------------------------

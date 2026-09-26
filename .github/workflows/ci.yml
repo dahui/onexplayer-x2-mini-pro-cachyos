@@ -22,11 +22,16 @@ jobs:
           # undefined and the run is pure noise.
           find . -name '*.sh' -not -path './.git/*' -print0 \
             | xargs -0 shellcheck -x -S warning
+          # Installed scripts without a .sh suffix, and pacman scriptlets
+          # (bash, but sourced by pacman, so no shebang).
+          shellcheck -x -S warning usr/lib/onexplayer-x2mini/paddle-watch
+          shellcheck -s bash -S warning packaging/*/*.install
 
       - name: bash -n every script
         run: |
           find . -name '*.sh' -not -path './.git/*' -print0 \
             | xargs -0 -n1 bash -n
+          bash -n usr/lib/onexplayer-x2mini/paddle-watch
 
   configs:
     name: Config files
@@ -91,14 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the self-contained packages build
-        # Only the two that source files next to the PKGBUILD; the other two
+      - name: Verify the self-contained package builds
+        # Only the one that sources files next to its PKGBUILD; the other two
         # hash release artifacts that do not exist until a tag is cut.
         #
         # This catches stale sha256sums, which is a real failure mode: editing a
         # source file without re-running updpkgsums leaves `makepkg -si` from a
         # clone dying on "One or more files did not pass the validity check",
-        # and install.sh uses exactly that path.
+        # and the release build uses exactly that path.
         run: |
           # Build in a container-local copy, not the bind mount: chowning /work
           # hands the runner's workspace to the container UID and breaks any
@@ -109,7 +114,7 @@ jobs:
             useradd -m builder
             cp -a /work /build
             chown -R builder /build
-            for p in oxpec-x2mini-dkms ryzen-smu-x2mini-dkms; do
+            for p in oxpec-x2mini-dkms; do
               echo "== $p"
               runuser -u builder -- bash -c "cd /build/packaging/$p && makepkg --verifysource --noconfirm"
               runuser -u builder -- bash -c "cd /build/packaging/$p && makepkg -f --nodeps --noconfirm"

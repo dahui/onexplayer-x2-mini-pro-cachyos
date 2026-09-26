@@ -1,6 +1,10 @@
 # ONEXPLAYER X2Mini PRO — SteamOS Manager / InputPlumber findings
 
-Investigated 2026-08-04 on the unit itself.
+Investigated 2026-08-04 on the unit itself, on Linux 7.1.6. **This is a dated
+snapshot, kept for its evidence.** Its "open work" has since been done: the
+button map is `oxpx2m` (captured on this unit), TDP is `oxp-tdpd`, and both
+kernel patches are upstream. For the current state on Linux 7.2 see the README,
+[controller.md](controller.md) and CLAUDE.md.
 
 ## The machine
 

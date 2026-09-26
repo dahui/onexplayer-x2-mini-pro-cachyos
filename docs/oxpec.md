@@ -1,6 +1,21 @@
 # oxpec support for the ONEXPLAYER X2Mini PRO
 
-**Status: built, installed via DKMS, and verified working on this machine.**
+**Status: upstream from Linux 7.3; shipped here as a DKMS module for 7.2 and
+older.**
+
+The entry was merged as mainline
+[`1b3c0028`](https://patch.msgid.link/20260805183102.38408-1-jeff@aletheia.io)
+("platform/x86: oxpec: Add support for OneXPlayer X2 Mini Pro", reviewed by
+Antheas Kapenekakis and Ilpo Järvinen) and first appears in **v7.3-rc1**. It is
+not in 7.2.y. Until 7.3 reaches CachyOS, `oxpec-x2mini-dkms` provides it.
+
+- `oxpec.c` in the package is v7.2's driver (blob `99c0dfc`) plus exactly this
+  hunk, byte-identical to mainline (blob `34bb17f`). Every kernel API it uses
+  matches the 7.2.3 headers.
+- `dkms.conf` sets `BUILD_EXCLUSIVE_KERNEL` to kernels before 7.3. On 7.3+ DKMS
+  skips the build, so the in-tree oxpec, which carries the entry, binds instead
+  of being shadowed by our `/updates` copy. Once 7.3 is the oldest kernel in
+  use, the package can simply be removed.
 
 ## Why
 
@@ -18,8 +33,8 @@ board type `oxp_fly`, so the fix is one table entry.
 
 ## What the patch does
 
-`0001-oxpec-add-ONEXPLAYER-X2Mini-PRO.patch` adds an entry immediately before
-the APEX one in `drivers/platform/x86/oxpec.c`:
+`0001-oxpec-add-ONEXPLAYER-X2Mini-PRO.patch` adds an entry at the end of the DMI
+table in `drivers/platform/x86/oxpec.c`:
 
 ```c
 {
@@ -92,17 +107,16 @@ available. That is unfinished business, not something this patch addresses.
 
 ## Install
 
+`install.sh` installs it from the release page, or build it from a clone:
+
 ```bash
 cd packaging/oxpec-x2mini-dkms && makepkg -si
 ```
 
-Needs `dkms` and kernel headers (both already present). It stages `src/oxpec.c`
-— the exact patched source verified on this machine — into
-`/usr/src/oxpec-x2mini-1.0/`, builds it, installs it to `/updates/dkms/`, and
-loads it.
-
-DKMS rebuilds it automatically on kernel updates, and it archives the stock
-`oxpec.ko.zst` so removal restores the original cleanly.
+It needs `dkms` and the running kernel's headers. It stages `oxpec.c`,
+`Makefile` and `dkms.conf` into `/usr/src/oxpec-x2mini-1.0/`, and DKMS builds it
+into `/updates`, where it takes precedence over the in-tree module. DKMS rebuilds
+it on kernel updates, for kernels before 7.3.
 
 The module auto-loads at boot with no extra config: once patched, the DMI
 modalias resolves to `oxpec`, so udev loads it during coldplug.
@@ -115,27 +129,26 @@ oxpec
 ### Uninstall
 
 ```bash
-sudo dkms remove -m oxpec-x2mini -v 1.0 --all
+sudo pacman -R oxpec-x2mini-dkms
 sudo modprobe -r oxpec
 ```
 
-That restores the stock module. Nothing in the parent directory depends on
-oxpec except the `[battery_charge_limit]` section of the device TOML, which goes
-inert rather than breaking.
+Arch's DKMS hook deregisters the module, which leaves the stock one. Nothing
+else here depends on oxpec except the `[battery_charge_limit]` section of the
+device TOML, which goes inert rather than breaking.
 
 ## Rebuilding the patch from upstream
 
-`src/oxpec.c` is pinned to what was verified here. To re-derive it against a
-newer kernel:
+`oxpec.c` is pinned to what was verified here. To re-derive it:
 
 ```bash
-curl -sSLo oxpec.c https://raw.githubusercontent.com/torvalds/linux/master/drivers/platform/x86/oxpec.c
+curl -sSLo oxpec.c https://raw.githubusercontent.com/torvalds/linux/v7.2/drivers/platform/x86/oxpec.c
 patch -p4 < 0001-oxpec-add-ONEXPLAYER-X2Mini-PRO.patch
 ```
 
-Note `-p4` — the patch paths are `a/drivers/platform/x86/oxpec.c` and the target
-is a bare `oxpec.c`. If it does not apply, the DMI table has moved; add the
-entry by hand next to the APEX one.
+Note `-p4`: the patch paths are `a/drivers/platform/x86/oxpec.c` and the target
+is a bare `oxpec.c`. Take it from a 7.2 tag, not master: master already contains
+the entry, so the patch would not apply.
 
 ## Notes on this install
 
@@ -148,11 +161,8 @@ entry by hand next to the APEX one.
   not something this install set. Verified read/write through steamos-manager
   (set to 80, read back 80, restored to 62).
 
-## Upstreaming
+## Upstreaming — done
 
-The patch is formatted for `git am` and carries a `Signed-off-by`. Worth sending
-to `platform-driver-x86@vger.kernel.org`, cc'ing the oxpec maintainer from
-`MAINTAINERS`, so the next kernel handles this device out of the box. The
-justification for reusing `oxp_fly` without a new register map is that the board
-is APEX-identical — say so in the commit message, since it is the whole basis
-for the change.
+Sent to `platform-driver-x86@vger.kernel.org` and merged as `1b3c0028` for 7.3.
+The justification for reusing `oxp_fly` without a new register map was that the
+board is APEX-identical.
