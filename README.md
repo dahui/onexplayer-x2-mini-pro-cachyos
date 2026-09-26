@@ -233,6 +233,7 @@ table layout, and measured behaviour. Start there for porting work.
 | [docs/tdpd.md](docs/tdpd.md) | The daemon: design, config, policies |
 | [docs/suspend.md](docs/suspend.md) | Suspend, the IOMMU trade, and the test harness |
 | [docs/hdr.md](docs/hdr.md) | HDR (now upstream) and the brightness investigation |
+| [docs/fsr4.md](docs/fsr4.md) | INT8 FSR 4 under proton-cachyos: setup and pitfalls |
 | [docs/ryzen-smu.md](docs/ryzen-smu.md) | The PM table patch, now upstream |
 | [docs/oxpec.md](docs/oxpec.md) | The EC driver patch, upstream from 7.3 |
 
