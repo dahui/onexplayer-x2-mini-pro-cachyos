@@ -25,8 +25,8 @@ are merged upstream, and HDR comes from gamescope itself:
 | **Extra buttons** | dead | OneXPlayer → QAM, Keyboard/Home → Steam+X |
 | **Back paddles** | dead | L4 / R4, on Linux 7.2+ with a workaround for `hid-oxp` ([details](docs/controller.md)) |
 | **Performance profiles** | absent | low-power / balanced / performance |
-| **Suspend** | hard hang on 7.1 | s2idle works with [one kernel parameter](#suspend-and-the-kernel-parameter); untested on 7.2 without it |
-| **HDR** | not offered | nothing to install on gamescope 3.16.30+ |
+| **Suspend** | hard hang | s2idle works with [one kernel parameter](#suspend-and-the-kernel-parameter), still needed on 7.2 |
+| **HDR** | not offered | works out of the box on gamescope 3.16.30+ (confirmed in games) |
 | **Brightness** | slider does nothing | works |
 
 Not fixed: **RGB lighting** (the controller ignores `hid-oxp`'s commands) and a
@@ -41,9 +41,11 @@ Not fixed: **RGB lighting** (the controller ignores `hid-oxp`'s commands) and a
 - An AUR helper (`paru` or `yay`) is convenient but not required. See
   [Install](#install).
 - Originally verified end to end on `7.1.6-1-cachyos-deckify` with
-  `steamos-manager 26.4.1` and `inputplumber 0.78.0`. The controller has been
-  re-measured on `7.2.3-1-cachyos-deckify`. A full re-run on 7.2.3 with
-  `inputplumber 0.81.0` and `gamescope 3.16.30` is pending.
+  `steamos-manager 26.4.1` and `inputplumber 0.78.0`. On `7.2.3-1-cachyos-deckify`
+  with `gamescope 3.16.30`, these have been re-verified so far: the controller,
+  suspend (with the parameter), HDR in games, and brightness. The packages
+  (TDP, fans, button mapping with `inputplumber 0.81.0`) have not yet been
+  re-installed and re-tested on 7.2.3.
 
 ## Install
 
@@ -121,9 +123,9 @@ from the published release named by their `pkgver`, not from your checkout.
 **Read this before deciding.** Nothing here applies it for you: kernel parameters
 belong in the bootloader config, not a package.
 
-On Linux 7.1 the machine **hung entering s0ix** and needed a forced power-off
-unless these were set. There is no S3 fallback on this platform: it is s2idle or
-nothing.
+Without it the machine **hangs entering s0ix** and needs a forced power-off,
+on Linux 7.1 and still on 7.2. There is no S3 fallback on this platform: it is
+s2idle or nothing.
 
 ```
 amd_iommu=off mem_sleep_default=s2idle
@@ -134,14 +136,15 @@ amd_iommu=off mem_sleep_default=s2idle
 | **The NPU** | `amdxdna` refuses to initialise without an IOMMU. No local AI acceleration, and the error appears on every boot. |
 | **DMA remapping** | Protection against malicious DMA from external devices. This machine has Thunderbolt, so it is not theoretical. GPU passthrough to VMs is also ruled out. |
 
-**Linux 7.2 has not been tested without it yet.** If 7.2 fixed s0ix entry, the
-parameter and its costs go away. Test it before relying on suspend, with the
-harness in [docs/suspend.md](docs/suspend.md), at the physical console; it walks
-the suspend stages safely before a real one.
+**Re-tested on 7.2.3: still required.** Keeping the IOMMU in passthrough mode
+(`iommu=pt`) and unloading the NPU driver both still freeze; only
+`amd_iommu=off` works. The evidence points at this board's firmware, since the
+APEX shares the board and the fix, and a BIOS update is the realistic way out.
+Details and the test harness: [docs/suspend.md](docs/suspend.md).
 
-If you do need it: on Limine, add the parameters to the `KERNEL_CMDLINE[default]`
-line in `/etc/default/limine`, then `sudo limine-update && sudo reboot`. It is
-fully reversible. For a gaming handheld this is usually the right trade, since
+On Limine, add the parameters to the `KERNEL_CMDLINE[default]` line in
+`/etc/default/limine`, then `sudo limine-update && sudo reboot`. It is fully
+reversible. For a gaming handheld this is usually the right trade, since
 working sleep matters daily and the NPU almost never does. **If you use the NPU,
 do not apply it:** keep the IOMMU and skip suspend.
 
@@ -151,7 +154,7 @@ do not apply it:** keep the IOMMU and skip suspend.
 |---|---|---|
 | **RGB lighting** | `hid-oxp` registers `oxp:rgb:joystick_rings`, but the controller acknowledges and ignores its commands. This unit is APEX-like here, and the APEX is on the driver's skip list for exactly this reason. | Upstream: add this board to `oxp_hybrid_mcu_list` so the dud device goes away ([notes](docs/controller.md#notes-for-upstream-hid-oxp)). Real control would need a different interface. |
 | **Custom Home mapping** | An InputPlumber 0.78 bug: any rule sourcing Home's capability corrupts the *next* button pressed. Not yet re-tested on 0.81. | Needs an upstream fix. Home's default Steam+X behaviour works regardless, so this is a nice-to-have. |
-| **`amd_iommu=off`** | See above. | Re-test on 7.2. If s0ix entry is fixed, the NPU comes back. |
+| **Suspend costs the NPU** | `amd_iommu=off` is still required on 7.2 (see above). | A BIOS update from OneXPlayer. Re-test after one. |
 
 ### Back paddles: working, with a workaround
 

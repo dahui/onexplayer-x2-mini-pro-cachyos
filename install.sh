@@ -383,9 +383,9 @@ if grep -q 'amd_iommu=off' /proc/cmdline 2>/dev/null; then
 	note "amd_iommu=off is set -- suspend should work"
 else
 	cat <<-'EOF'
-	    NOT SET. On Linux 7.1 this machine HUNG entering s0ix without
-	    amd_iommu=off and needed a forced power-off. There is no S3 fallback.
-	    Test suspend before relying on it (docs/suspend.md); if it hangs, add:
+	    NOT SET. Without amd_iommu=off this machine HANGS entering s0ix and
+	    needs a forced power-off -- still true on Linux 7.2 (iommu=pt does not
+	    help). There is no S3 fallback. To use suspend, add:
 
 	        amd_iommu=off mem_sleep_default=s2idle
 

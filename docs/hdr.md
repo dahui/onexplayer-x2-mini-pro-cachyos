@@ -25,10 +25,32 @@ both entries score 5000 against the same EDID, so which one gamescope picked
 was not deterministic. Upgrading `onexplayer-x2mini` deletes
 `/etc/gamescope/scripts/onexplayer.x2mini.oled.lua`.
 
-Still to confirm on the new setup: HDR engaging in a real title
-(`GAMESCOPE_HDR_OUTPUT_FEEDBACK = 1`), and that brightness still works (see
-[below](#why-it-started-working-is-not-proven)). The pretty name in logs and
-Steam now reads "Lenovo Legion Go 2 OLED", which is cosmetic.
+**Confirmed in games on 7.2.3 (2026-09-26)**, with `amd_iommu=off` and nothing
+of ours installed. HDR worked out of the box:
+
+```
+[Gamescope WSI] Creating swapchain ... format: VK_FORMAT_A2B10G10R10_UNORM_PACK32
+                colorspace: VK_COLOR_SPACE_HDR10_ST2084_EXT
+  server hdr output enabled:     true
+  hdr formats exposed to client: true
+xwm: HDR output enabled (hdr_content_driven)      15:48:20
+xwm: HDR output disabled (hdr_content_driven)     15:49:02
+
+GAMESCOPE_DISPLAY_SUPPORTS_HDR = 1
+GAMESCOPE_DISPLAY_HDR_ENABLED  = 1
+GAMESCOPE_HDR_OUTPUT_FEEDBACK  = 1
+```
+
+Note the new behaviour: the upstream entry sets `content_driven`, so gamescope
+switches the panel to HDR10 PQ **only while HDR content is on screen**, and back
+to SDR when it goes. An `HDR output disabled` line after leaving a game is
+expected, not a fault.
+
+Brightness also still works in SDR. `holo-priv-write` granted the backlight at
+login (`commit: 236000 -> …/amdgpu_bl1/brightness`), and Steam moved it directly
+afterwards. Dimming *during* HDR goes through the entry's `software_backlight`
+instead, and has not been checked separately. The pretty name in logs and Steam
+now reads "Lenovo Legion Go 2 OLED", which is cosmetic.
 
 Everything below is the history of how HDR was enabled before that entry
 existed, and still explains the mechanism.

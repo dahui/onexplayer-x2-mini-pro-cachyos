@@ -391,8 +391,13 @@ panel's EDID timing.
 Our own script (`oxp_x2mini_oled`, same match, same priority) was **removed**. A
 tie at 5000 against the same EDID left the winner to chance. Do not re-add a
 custom entry unless it scores higher and there is a measured reason.
-HDR engagement in a real title has not yet been re-confirmed with the upstream
-entry.
+**Confirmed in games on 7.2.3 with the upstream entry:** a title created an
+`HDR10_ST2084` swapchain, gamescope logged `xwm: HDR output enabled
+(hdr_content_driven)`, and all three atoms read 1. `content_driven` means the
+output switches to PQ only while HDR content is on screen and back to SDR after,
+so an `HDR output disabled` line on leaving a game is expected. SDR brightness
+still works through `holo-priv-write`. Dimming in PQ mode (`software_backlight`)
+has not been checked separately.
 
 **`--hdr-enabled` is NOT required**, despite most guides implying otherwise, and
 an earlier version of this document wrongly called it necessary. Verified with
@@ -702,10 +707,10 @@ and should **not** be folded into the CompositeDevice.
 
 ---
 
-## 8. Suspend — requires two kernel parameters (on 7.1; 7.2 untested)
+## 8. Suspend — requires two kernel parameters (7.1 and 7.2)
 
-**On 7.1.6, s2idle works, but only with these on the kernel command line.**
-Linux 7.2 has not been tested without them yet:
+**s2idle works, but only with these on the kernel command line.** Verified on
+7.1.6, and again on 7.2.3 (2026-09-26):
 
 ```
 amd_iommu=off mem_sleep_default=s2idle
@@ -734,6 +739,30 @@ amdxdna 0000:66:00.1: [drm] *ERROR* aie2_init: Running without IOMMU not support
 That error then appears on every boot; it is expected, not a regression. DMA
 remapping is also gone, which matters on a machine with `thunderbolt` loaded, and
 GPU passthrough is ruled out. There is no partial mode.
+
+**Re-tested on 7.2.3: nothing short of `amd_iommu=off` works.** Every run was a
+real suspend with a 30 s RTC wake:
+
+| IOMMU | `amdxdna` | result |
+|---|---|---|
+| translated (stock) | loaded | freeze (pm_test ladder passed first) |
+| translated | unloaded | freeze, fans left running |
+| passthrough (`iommu=pt`) | loaded | freeze ×2 |
+| off | cannot load | works, 29.49 s of 30 s in S0i3 |
+
+That rules out the NPU (the first suspect, since `amd_iommu=off` also disables
+it) and DMA translation (passthrough still freezes). What remains is what only
+`amd_iommu=off` removes, chiefly interrupt remapping, and the likeliest source
+is this board's firmware (BIOS 0.20). The APEX, on the same board, needs the
+same fix, and other Strix Halo machines suspend with the IOMMU on. That is
+inferred, not traced: nothing reaches disk after the pre-sleep sync. A BIOS
+update is the realistic route to having both.
+
+**Testing without a keyboard:** the harness refuses SSH sessions, but a
+detached `systemd-run … CONSOLE_OVERRIDE=1 AUTO=1 WAKE_SECS=30 … none` survives
+the connection dropping, and `/var/log/suspend-test.log` plus the persistent
+journal carry the evidence. Before relaunching after a reconnect, check that log
+for the previous `ATTEMPT` line; the result may simply not have reached you.
 
 This is a manual bootloader edit — nothing installs or reverts it automatically,
 so anyone adapting this work should be told the trade explicitly rather than
@@ -772,7 +801,7 @@ since 2026-09-26). Status of everything that depended on a kernel version:
 | Rumble | nothing | Works via xpad force feedback; hid-oxp adds a strength setting. |
 | oxpec DMI entry | 7.3 | Upstream (`1b3c0028`, v7.3-rc1). The DKMS package covers 7.2 and older, and skips itself on 7.3+ (§4.2). |
 | ryzen_smu PM table | none (out-of-tree) | Upstream (`b098884`). `ryzen_smu-dkms-git` builds on 7.2 only from `d298366` onward (§4.1). |
-| Dropping `amd_iommu=off` | a kernel that fixes s0ix entry | **Untested on 7.2.** Cheap and reversible: without the parameter, run `suspend/suspend-test.sh ladder`, then `none`, at the console. |
+| Dropping `amd_iommu=off` | a firmware (or kernel) fix | **Still required on 7.2.3.** Stock, NPU unloaded and `iommu=pt` all freeze; only `amd_iommu=off` reaches S0i3 (§8). |
 | Custom Home mapping | an InputPlumber fix | Blocked on 0.78 (§7). Not re-tested on 0.81.0; hid-oxp does not change how `0x24` is reported. |
 
 Still ours to upstream: the two hid-oxp changes in `docs/controller.md`

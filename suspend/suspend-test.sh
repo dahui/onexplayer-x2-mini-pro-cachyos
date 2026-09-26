@@ -192,16 +192,34 @@ attempt() {
 	fi
 	local elapsed=$((SECONDS - start))
 
-	record "SURVIVED pm_test=$level rc=$rc elapsed=${elapsed}s"
-	say "Returned from '$level' after ${elapsed}s (rc=$rc)"
-
 	# Reset so a later reboot does not leave a test mode armed.
 	echo none > /sys/power/pm_test 2>/dev/null
+
+	# A non-zero rc means the kernel refused or aborted the transition, not
+	# that it came through it. Recording that as SURVIVED once made a stage
+	# that never ran look like a pass.
+	if [[ "$rc" -ne 0 ]]; then
+		record "REJECTED pm_test=$level rc=$rc elapsed=${elapsed}s"
+		say "'$level' was rejected or aborted (rc=$rc) -- see 'journalctl -k -b'"
+		return 1
+	fi
+
+	record "SURVIVED pm_test=$level rc=$rc elapsed=${elapsed}s"
+	say "Returned from '$level' after ${elapsed}s (rc=$rc)"
 	return 0
 }
 
 ladder() {
-	for level in freezer devices platform core; do
+	local levels="freezer devices platform core"
+	# The kernel rejects core/processors for suspend-to-idle ("Unsupported test
+	# mode for suspend to idle"), and s2idle is the only mode this platform has,
+	# so the ladder ends at platform there.
+	if grep -q '\[s2idle\]' /sys/power/mem_sleep 2>/dev/null; then
+		levels="freezer devices platform"
+		note "s2idle: stopping at 'platform' -- the kernel has no deeper test stage for it"
+	fi
+
+	for level in $levels; do
 		attempt "$level" || return 1
 	done
 
@@ -212,7 +230,7 @@ ladder() {
 		note "proceeding to a real suspend (unattended, RTC wake)"
 		attempt none
 	else
-		note "The suspend path itself is sound to the syscore stage."
+		note "The suspend path itself is sound up to the real low-power entry."
 		note "Run 'sudo $0 none' for a real suspend when you are ready."
 	fi
 }

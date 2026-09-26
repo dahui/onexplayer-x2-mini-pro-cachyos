@@ -1,7 +1,10 @@
 # Suspend — working
 
-**Solved by two kernel parameters.** s2idle suspends and resumes reliably, the
-controller survives, and `oxp-tdpd` reapplies its limit on wake.
+**Solved by two kernel parameters, still required on Linux 7.2.** s2idle
+suspends and resumes reliably, the controller survives, and `oxp-tdpd` reapplies
+its limit on wake. Verified on 7.1.6 and again on 7.2.3 (2026-09-26), where
+`iommu=pt` and unloading the NPU driver were also tried and did not help (see
+[Getting both back](#getting-both-back--not-on-72)).
 
 ```
 amd_iommu=off mem_sleep_default=s2idle
@@ -81,31 +84,59 @@ anything in this repo.
 Fully reversible: remove the parameter, `sudo limine-update`, reboot. Nothing
 else here depends on it.
 
-### Getting both back
+### Getting both back — not on 7.2
 
-The only route is a kernel that fixes s0ix entry on Strix Halo without the
-workaround. **Linux 7.2 has shipped in CachyOS** (`7.2.3-1-cachyos-deckify`) and
-is the next one to test. That test has not been run yet. Nothing promises 7.2
-fixes this; it is worth testing because it is cheap and reversible, not because
-it is expected.
+**Re-tested on `7.2.3-1-cachyos-deckify` (2026-09-26): the parameter is still
+required.** Every run was a real suspend with a 30 s RTC wake, launched as a
+detached systemd unit over SSH, with none of this repo's modules installed:
 
-Re-test after any major kernel bump:
+| IOMMU | NPU driver (`amdxdna`) | Result |
+|---|---|---|
+| on, translated (stock) | loaded | freeze — pm_test `freezer`/`devices`/`platform` all passed first |
+| on, translated | unloaded (`modprobe -r`) | freeze — fans stayed running this time |
+| on, passthrough (`iommu=pt`) | loaded | freeze, twice |
+| **off** (`amd_iommu=off`) | cannot load | **works** — `Last S0i3 Status: Success`, 29.49 s of 30 s in S0i3 |
+
+Each freeze left the journal ending at the harness's pre-sleep sync, with
+nothing after it. The machine needed a forced power-off, and often a second
+reboot to get Wi-Fi back.
+
+What the table rules out:
+
+- **The NPU.** `amd_iommu=off` also stops `amdxdna` from loading, so it was a
+  candidate. But with the IOMMU on and the NPU driver unloaded, it still froze.
+- **DMA address translation.** Passthrough keeps the IOMMU present but
+  identity-maps devices, and it still froze. What `amd_iommu=off` removes beyond
+  that is chiefly interrupt remapping (the `iommu=pt` boot logged
+  `AMD-Vi: Interrupt remapping enabled`).
+- **Strix Halo or the kernel in general.** Other Strix Halo machines suspend on
+  the same kernels with the IOMMU on.
+
+The fit is this board's firmware (BIOS 0.20, 06/10/2026): how it describes the
+IOMMU or interrupt routing across the S0i3 transition. The ONEXPLAYER APEX, on
+the same board, needs the same workaround. That is inference, not a trace. The
+hang happens after the last point anything reaches disk, and there is no serial
+console. The realistic route to having both is a BIOS update from OneXPlayer.
+Re-test after one, or after a major kernel bump:
 
 ```bash
-# drop the parameter from /etc/default/limine
+# drop amd_iommu=off from /etc/default/limine
 sudo limine-update && sudo reboot
-sudo ./suspend/suspend-test.sh ladder     # then `none` for the real thing
+sudo ./suspend/suspend-test.sh ladder     # stops at 'platform' on s2idle
+sudo ./suspend/suspend-test.sh none       # the real thing
 ```
 
-If the ladder reaches `none` and survives, the IOMMU can stay on and the NPU
-comes back. If it hangs, put the parameter back — you will have lost nothing but
-a reboot.
+Without a keyboard, run both detached over SSH, as in the unattended example
+below.
 
-On 7.2, also check the back paddles after the real `none` resume. hid-oxp
-re-initialises the controller about 6 s after wake, and that init silences the
-paddles until `oxp-x2mini-paddles.service` re-arms them
-([controller.md](controller.md)). `journalctl -u oxp-x2mini-paddles` should show
-a "re-sent button map" line shortly after each resume.
+If `none` survives, the IOMMU can stay on and the NPU comes back. If it hangs,
+put the parameter back; you will have lost nothing but a reboot.
+
+On 7.2, also check the back paddles after a real resume. hid-oxp re-initialises
+the controller about 6 s after wake, and that init silences the paddles until
+`oxp-x2mini-paddles.service` re-arms them ([controller.md](controller.md)).
+`journalctl -u oxp-x2mini-paddles` should show a "re-sent button map" line
+shortly after each resume.
 
 ## Two things that did NOT need fixing
 
@@ -139,12 +170,18 @@ on the way down is caught with the machine still alive.
 freezer   SURVIVED  rc=0  5s
 devices   SURVIVED  rc=0  7s     <- all drivers suspended and resumed cleanly
 platform  SURVIVED  rc=0  2s
-core      rc=1      0s           <- write rejected; this level is unusable here
+core      rc=1      0s           <- rejected: no 'core' stage for suspend-to-idle
 none      <hang>                 <- only the real s0ix entry failed
 ```
 
 That is what proved the software path was sound and pointed at the hardware
 transition, where the IOMMU turned out to be implicated.
+
+The `core` rejection is the kernel's own rule, not a fault: `PM: Unsupported
+test mode for suspend to idle, please choose none/freezer/devices/platform`.
+s2idle is the only sleep mode here, so the ladder now stops at `platform`. The
+harness also used to log a rejected stage as `SURVIVED`; it now records
+`REJECTED` and stops.
 
 ```bash
 sudo ./suspend/suspend-test.sh ladder      # pm_test stages, stops before real suspend
