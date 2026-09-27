@@ -23,7 +23,7 @@ are merged upstream, and HDR comes from gamescope itself:
 | **TDP** | slider does nothing | 10–85 W through Steam's slider |
 | **Fans / charge limit** | no sensors, no limit | RPM, PWM, charge threshold (kernels before 7.3) |
 | **Extra buttons** | dead | OneXPlayer → QAM, Keyboard/Home → Steam+X |
-| **Back paddles** | dead | L4 / R4, on Linux 7.2+ with a workaround for `hid-oxp` ([details](docs/controller.md)) |
+| **Back paddles** | dead | L4 / R4, on Linux 7.2+ with a workaround for `hid-oxp` that also keeps Guide and Home working ([details](docs/controller.md)) |
 | **Performance profiles** | absent | low-power / balanced / performance |
 | **Suspend** | hard hang | s2idle works with [one kernel parameter](#suspend-and-the-kernel-parameter), still needed on 7.2 |
 | **HDR** | not offered | works out of the box on gamescope 3.16.30+ (confirmed in games) |
@@ -163,8 +163,16 @@ init sends the button map, then switches the controller's mode, and on this unit
 the mode switch discards the map. `onexplayer-x2mini` ships a small watcher
 (`oxp-x2mini-paddles.service`, started by udev) that re-sends the map after
 every such switch. The paddles then reach Steam as **L4 / R4**, and you bind
-them in Steam's controller settings like on a Deck. Full measurements, and notes
-for a proper upstream fix, are in [docs/controller.md](docs/controller.md).
+them in Steam's controller settings like on a Deck.
+
+The map has a catch of its own: it has no entries for **Guide** or **Home**, and
+once it takes effect both go dead. So the watcher follows every map with a
+second write restoring them, using the values HHD sends to the X2 series.
+Without the watcher, hid-oxp's own init leaves Guide and Home working and the
+paddles silent, but writing any of its `button_*` attributes then switches
+Guide and Home off.
+Full measurements, and notes for a proper upstream fix, are in
+[docs/controller.md](docs/controller.md).
 
 ## Verifying
 
@@ -182,7 +190,7 @@ oxpec          loaded    fan RPM + PWM + charge limit
 ryzen_smu      loaded    ryzen_smu-dkms-git, PM table 0x64010C
 oxp-tdpd       active    10-85W through Steam's slider
 inputplumber   active    oxpx2m map; OneXPlayer -> QAM, Keyboard/Home -> Steam+X
-paddles        active    L4 / R4 via hid-oxp + oxp-x2mini-paddles
+paddles        active    L4 / R4 via hid-oxp + oxp-x2mini-paddles; Guide, Home live
 HDR            enabled   panel matched by gamescope's Legion Go 2 entry
 ```
 

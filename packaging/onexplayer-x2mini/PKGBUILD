@@ -64,9 +64,11 @@ package() {
 	install -Dm644 etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb \
 		"$pkgdir/etc/udev/hwdb.d/61-inputplumber-onexplayer-x2mini.hwdb"
 
-	# Back paddles. hid-oxp's init leaves them silent on this unit; the watcher
-	# re-arms them after every init, and the udev rule starts it whenever
-	# hid-oxp binds. See docs/controller.md.
+	# Back paddles, Guide and Home. hid-oxp's init leaves the paddles silent on
+	# this unit, and its button map switches Guide and Home off once it takes
+	# effect. The watcher re-sends the map after every init, followed by a page
+	# restoring Guide and Home; the udev rule starts it whenever hid-oxp binds.
+	# See docs/controller.md.
 	install -Dm755 usr/lib/onexplayer-x2mini/paddle-watch \
 		"$pkgdir/usr/lib/onexplayer-x2mini/paddle-watch"
 	install -Dm644 usr/lib/systemd/system/oxp-x2mini-paddles.service \

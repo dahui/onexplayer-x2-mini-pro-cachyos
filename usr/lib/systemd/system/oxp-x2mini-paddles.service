@@ -1,5 +1,5 @@
 [Unit]
-Description=Keep ONEXPLAYER X2Mini PRO back paddles enabled (hid-oxp workaround)
+Description=Keep ONEXPLAYER X2Mini PRO back paddles, Guide and Home enabled (hid-oxp workaround)
 Documentation=https://github.com/dahui/onexplayer-x2-mini-pro-cachyos/blob/main/docs/controller.md
 # Static on purpose: 70-onexplayer-x2mini-paddles.rules starts it when hid-oxp
 # binds the controller, which covers boot (coldplug), hotplug and rebinds.

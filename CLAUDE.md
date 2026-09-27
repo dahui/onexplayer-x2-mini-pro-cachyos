@@ -476,7 +476,7 @@ neighbours.
 
 | Button | Emits | Mapped to |
 |---|---|---|
-| Guide / Xbox | `BTN_MODE` on the X-Box pad | untouched, works |
+| Guide / Xbox | `BTN_MODE` on the X-Box pad | no rule ✅ — on 7.2 only with the watcher's page 3, see below |
 | OneXPlayer | `KeyLeftCtrl`+`KeyLeftMeta`+`KeyLeftAlt` | `QuickAccess` (QAM) ✅ |
 | Keyboard | `KeyLeftCtrl`+`KeyLeftMeta`+`KeyO` | `Keyboard` → Steam+X ✅ |
 | Home | vendor HID B2 frame, btn `0x24` | Steam+X via stock profile ✅ |
@@ -509,7 +509,9 @@ Button reports use cid `0xB2`, with **byte 6 = button id** and **byte 12 = state
 Button ids: `0x21` Guide, `0x22`/`0x23` the paddles, `0x24` the button this model
 places at Home. InputPlumber's enum calls `0x24` `Keyboard` because it was
 written for the OXP X1 — a misnomer here, confirmed by marker bracketing, not a
-bug to "fix".
+bug to "fix". Those ids are what 7.1's full-intercept frames reported. In the
+**B4 button map** Guide's slot is `0x25` (mapped to gamepad code `0x21`) and
+Home's is `0x24`.
 
 **On 7.1 the paddles required full-intercept mode**, a bad trade:
 
@@ -565,7 +567,33 @@ capability-map rule.
 vendor hidraw node. When it sees the MCU confirm a switch to xinput
 (`b2 3f 01 00 01`, the last step of every init), it re-sends the map by
 rewriting `button_m1` with its current value. Any button write re-sends the
-whole map, so sysfs remaps survive. Not yet exercised across a real resume.
+whole map, so sysfs remaps survive. It then sends a third map page restoring
+Guide and Home (next paragraph). Across a real resume (2026-09-26) every button
+kept working and the watcher had nothing to do (§8).
+
+**Guide and Home: hid-oxp's map switches them off.** The map has 18 slots and
+none for Guide or Home. Once it takes effect, both stop reporting on every
+interface (usbmon: no Guide bit on the X-Box pad, no `0x24` frame). The fix is
+the page HHD sends to the X2 series (`hhd-dev/hhd`, `hid_v1.py`,
+`INITIALIZE_X2`), always *after* pages 1 and 2, since sending those resets
+Guide and Home again:
+
+```
+B4 3F 01 | 02 38 02 03 01 | 24 02 02 05 00 00 | 25 01 21 00 00 00 | 00… | 3F B4
+```
+
+Verified 2026-09-26 at the deck-uhid output: Guide, both paddles, Home,
+Keyboard and OneXPlayer all reach Steam together. Two traps:
+
+- hid-oxp's table calls gamepad code `0x22` `BTN_GUIDE`. **Guide is `0x21`**;
+  mapping it to `0x22` leaves Guide dead.
+- **Page 3 is stored in the MCU and survives a full power-off.** A wrong value
+  stays until this page is sent again. Debug-mode frames do not read back the
+  stored mapping (normal-mode B2 frames do, in bytes 7–9), so do not derive
+  values from them.
+
+After writing any `button_*` attribute by hand, restart
+`oxp-x2mini-paddles`; the watcher only reacts to mode switches.
 
 **Do not remap M1/M2 in hid-oxp sysfs.** That remap happens inside the
 controller, and moves the paddles out of the vendor frames InputPlumber reads.
@@ -778,10 +806,12 @@ s0ix entry hung. Do not repeat that bisect.
 
 **The controller survives resume.** PCI `0000:65:00.4` stays bound to `xhci_hcd`
 across the transition and all buttons work, so the APEX's resume-rebind service
-is not needed here — confirm before porting it. On 7.2, hid-oxp re-initialises
-the MCU ~6 s after resume, which silences the paddles until `paddle-watch`
-re-arms them (§7). Check `journalctl -u oxp-x2mini-paddles` after the first real
-resume on 7.2.
+is not needed here — confirm before porting it. On 7.2 hid-oxp *can*
+re-initialise the MCU after resume (on the MCU's reset notice), which would
+silence the paddles, Guide and Home until `paddle-watch` re-arms them (§7). On
+the first real resume with the full package (2026-09-26: 23.6 s in S0i3, TDP
+re-applied at 35 W) it did not: the map survived, every button worked, and the
+watcher logged nothing.
 
 Consequence for anything driving TDP: SMU limits do **not** survive a power
 transition, so a resume hook is required. Ours (logind `PrepareForSleep`) is now
@@ -797,6 +827,7 @@ since 2026-09-26). Status of everything that depended on a kernel version:
 | Item | Needs | Status |
 |---|---|---|
 | Back paddles | 7.2 (`hid-oxp`) + `paddle-watch` | **Working** — hid-oxp alone leaves them silent on this board (init order, §7); the watcher re-arms them. The real fix is in hid-oxp. |
+| Guide, Home with the paddles armed | `paddle-watch` (page 3) | **Working** — hid-oxp's map disables both; the watcher restores them after every map (§7). |
 | RGB | an hid-oxp change | **Not working** — the controller ignores the `0xb8` RGB path; the board belongs on `oxp_hybrid_mcu_list` (§7). |
 | Rumble | nothing | Works via xpad force feedback; hid-oxp adds a strength setting. |
 | oxpec DMI entry | 7.3 | Upstream (`1b3c0028`, v7.3-rc1). The DKMS package covers 7.2 and older, and skips itself on 7.3+ (§4.2). |
@@ -804,8 +835,8 @@ since 2026-09-26). Status of everything that depended on a kernel version:
 | Dropping `amd_iommu=off` | a firmware (or kernel) fix | **Still required on 7.2.3.** Stock, NPU unloaded and `iommu=pt` all freeze; only `amd_iommu=off` reaches S0i3 (§8). |
 | Custom Home mapping | an InputPlumber fix | Blocked on 0.78 (§7). Not re-tested on 0.81.0; hid-oxp does not change how `0x24` is reported. |
 
-Still ours to upstream: the two hid-oxp changes in `docs/controller.md`
-(paddle init order; RGB skip list). Both kernel patches we did send are merged.
+Still ours to upstream: the hid-oxp changes in `docs/controller.md` (paddle
+init order; page 3 for Guide/Home and the `BTN_GUIDE` code; RGB skip list). Both kernel patches we did send are merged.
 
 ---
 
@@ -824,7 +855,7 @@ cat /sys/kernel/ryzen_smu_drv/codename           # 26 = Strix Halo
 sudo od -A n -t f4 -N 24 -w24 /sys/kernel/ryzen_smu_drv/pm_table
 
 # controller (hid-oxp, 7.2)
-systemctl status oxp-x2mini-paddles              # paddle re-arm watcher
+systemctl status oxp-x2mini-paddles              # paddle + Guide/Home re-arm watcher
 D=$(dirname /sys/bus/hid/drivers/hid-oxp/*/button_m1); cat $D/gamepad_mode $D/button_m1
 sudo cat /sys/kernel/debug/hid/0003:1A86:FE00.*/events   # raw reports, under any grab
 

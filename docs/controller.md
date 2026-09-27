@@ -1,4 +1,4 @@
-# The controller on Linux 7.2: hid-oxp, the back paddles, RGB
+# The controller on Linux 7.2: hid-oxp, the back paddles, Guide, RGB
 
 Linux 7.2 ships `hid-oxp`, a driver for the OneXPlayer vendor controller interface
 (`1a86:fe00`). It binds this unit's controller out of the box. It was expected to
@@ -8,15 +8,19 @@ fix the back paddles and add RGB control. On this machine, measured on
 | | Result |
 |---|---|
 | **Back paddles** | Work, **with a workaround** shipped in `onexplayer-x2mini`. hid-oxp's own init leaves them silent. |
+| **Guide, Home** | Work, with the same workaround. hid-oxp's button map switches them off once it takes effect. |
 | **RGB** | **Does not work.** hid-oxp registers `oxp:rgb:joystick_rings`, but the controller ignores every write. |
 | **Rumble** | Works as before: Steam → InputPlumber (deck-uhid) → xpad force feedback. hid-oxp adds a strength setting. |
-| Everything else | Unchanged from 7.1: Home, the OneXPlayer and Keyboard chords, and the X-Box pad. |
+| Everything else | Unchanged from 7.1: the OneXPlayer and Keyboard chords, and the X-Box pad. |
 
 Every result below comes from raw HID reports read through
 `/sys/kernel/debug/hid/0003:1A86:FE00.*/events`. That view sits underneath any
 driver or grab, so "nothing arrived" really means the controller sent nothing.
 Captures were bracketed with buttons already known to work (A, Home, the chords),
-so an empty capture could not be confused with a broken one.
+so an empty capture could not be confused with a broken one. The Guide work
+used `usbmon` on bus 1 instead, which also covers the X-Box pad (xpad is not a
+HID device), together with the raw output of InputPlumber's virtual Steam Deck
+controller, so each press could be followed from the controller to Steam.
 
 ## Back paddles
 
@@ -54,7 +58,8 @@ the right paddle, they are not swapped here.
 `/usr/lib/onexplayer-x2mini/paddle-watch` reads the vendor hidraw node, read-only,
 alongside InputPlumber. The MCU confirms every mode switch with a
 `b2 3f 01 <mode> 01` frame, and switching to xinput (`00`) is the last step of
-every hid-oxp init. When the watcher sees that, it re-sends the map:
+every hid-oxp init. When the watcher sees that, it re-sends the map, then the
+Guide/Home page described in the next section:
 
 ```bash
 v=$(cat .../button_m1); echo "$v" > .../button_m1   # any button write re-sends the whole map
@@ -68,11 +73,58 @@ node disappears and systemd restarts it against the new one.
 
 ```bash
 systemctl status oxp-x2mini-paddles
-journalctl -u oxp-x2mini-paddles     # "re-sent button map (...)" per init
+journalctl -u oxp-x2mini-paddles     # "re-sent button map and Guide/Home page (...)" per init
 ```
 
-Not yet verified across a real suspend/resume. The resume path is the same
-init, so it should be caught the same way.
+The watcher reacts only to mode switches. After writing a `button_*` attribute
+by hand, run `sudo systemctl restart oxp-x2mini-paddles` to restore Guide and
+Home.
+
+Across a real suspend and resume (s2idle, 23.6 s in S0i3, 2026-09-26) every
+button kept working, the paddles, Guide and Home included. The watcher logged
+nothing: hid-oxp did not re-run its init on that resume, so the controller
+simply kept its map. When the init does run (it is scheduled from the MCU's
+reset notice), it ends with the same switch to xinput as at bind, which the
+watcher catches; a hid-oxp rebind exercised exactly that path.
+
+## Guide and Home: the map switches them off
+
+hid-oxp's button map has 18 slots on two pages: A to Start, then Select, the
+sticks' clicks, the d-pad and M1/M2 (the paddles). Guide and Home are not in
+it. On this unit, once that map takes effect, they stop reporting entirely:
+usbmon showed no Guide bit on the X-Box pad and no Home frame on the vendor
+interface. So arming the paddles, as above, disabled Guide and Home.
+
+The missing entries are a third page, which the X2 series needs and hid-oxp
+never sends. HHD sends it (`hhd-dev/hhd`, `device/oxp/hid_v1.py`,
+`INITIALIZE_X2`, after the two map pages):
+
+```
+B4 3F 01 | 02 38 02 03 01 | 24 02 02 05 00 00 | 25 01 21 00 00 00 | 00… | 3F B4
+                  page 3    Home -> kbd 02 05   Guide -> gamepad 0x21
+```
+
+The watcher sends exactly this page about a second after each map (hid-oxp
+writes its pages from a work queue, 200 ms apart). Order matters: sending
+pages 1 and 2 turns Guide and Home off again, so page 3 always comes last.
+Measured with every button, 2026-09-26: Guide, both paddles, Home, Keyboard and
+OneXPlayer all reached Steam, at boot (hid-oxp rebind) and after a
+debug → xinput switch.
+
+Things learned the hard way, for anyone touching this page:
+
+- **Guide is MCU button `0x25`, and its gamepad code is `0x21`.** hid-oxp's
+  mapping table names gamepad code `0x22` `BTN_GUIDE` and skips `0x21`. Mapping
+  Guide to `0x22` leaves it dead.
+- **Normal-mode B2 frames carry the button's current mapping** in bytes 7–9
+  (the paddles report `02 01 69`, their F16 mapping). Debug-mode frames do not:
+  they reported Guide as `25 01 21` and Home as `24 02 02 05`, HHD's values,
+  even while Home's stored mapping was different. Treat them as a hint only.
+- **Page 3 is stored in the MCU.** A wrong value survived a full power-off. If
+  Guide or Home is ever dead at the USB level with the map applied, sending
+  this page again restores them.
+- Home with its first-boot value (`24 02 01 0d`, as read from its frames) also
+  set the Guide bit on the X-Box pad. HHD's value does not.
 
 ### Why the init re-ran during testing
 
@@ -146,3 +198,8 @@ Not sent; recorded for when it is. Maintainer: Derek J. Clark,
 4. Minor: the default-map comments label index 48 as `KEY_F15` and 49 as
    `KEY_F16`, but the table entries are `KEY_F16` and `KEY_F17`, which is also
    what sysfs reports.
+5. **Guide and Home: send page 3.** The map should end with HHD's X2 page 3
+   (`24 02 02 05`, `25 01 21`), sent after pages 1 and 2 whenever they are.
+   Without it, applying the map disables Guide and Home on this board.
+6. **`BTN_GUIDE` is `0x21`, not `0x22`** (measured on this board; HHD agrees).
+   Exposing Guide for remapping would need that fixed first.

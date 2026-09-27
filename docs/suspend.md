@@ -132,11 +132,12 @@ below.
 If `none` survives, the IOMMU can stay on and the NPU comes back. If it hangs,
 put the parameter back; you will have lost nothing but a reboot.
 
-On 7.2, also check the back paddles after a real resume. hid-oxp re-initialises
-the controller about 6 s after wake, and that init silences the paddles until
-`oxp-x2mini-paddles.service` re-arms them ([controller.md](controller.md)).
-`journalctl -u oxp-x2mini-paddles` should show a "re-sent button map" line
-shortly after each resume.
+On 7.2, also check the back paddles, Guide and Home after a real resume. If
+hid-oxp re-initialises the controller after wake, that init silences them until
+`oxp-x2mini-paddles.service` re-arms them ([controller.md](controller.md)), and
+`journalctl -u oxp-x2mini-paddles` shows a "re-sent button map" line. On the
+first test (2026-09-26) no re-init happened and every button simply kept
+working.
 
 ## Two things that did NOT need fixing
 

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2026 Jeff Hagadorn <jeff@aletheia.io>
 #
-# Keep the ONEXPLAYER X2Mini PRO back paddles reporting under hid-oxp.
+# Keep the ONEXPLAYER X2Mini PRO back paddles, Guide and Home all reporting
+# under hid-oxp.
 #
 # The paddles only report once the controller MCU has been sent its button map
 # (a B4 frame), and on this unit the map is lost whenever the MCU is switched
@@ -19,6 +20,16 @@
 # Writing any button attribute makes hid-oxp send the whole map again with its
 # current settings, so rewriting button_m1 with its own value changes nothing
 # except re-arming the paddles. Custom remaps made through sysfs survive.
+#
+# That map has a second problem on this unit: it covers 18 buttons and not Guide
+# (0x25) or Home (0x24), and once it takes effect those two stop reporting at
+# all. So every map send is followed by a third page with their Windows
+# mappings, byte for byte what HHD sends to the X2 series (hhd-dev/hhd,
+# device/oxp/hid_v1.py, INITIALIZE_X2). The page has to come after hid-oxp's
+# two: sending those resets Guide and Home again. Note that hid-oxp's table
+# names gamepad code 0x22 BTN_GUIDE; mapping Guide to it leaves Guide dead. The
+# Guide code is 0x21. Page 3 is stored in the MCU and survives a power cycle,
+# so a wrong value there persists until this page is sent again.
 #
 # Started by 70-onexplayer-x2mini-paddles.rules; exits non-zero when the node
 # disappears so systemd restarts it against the new one.
@@ -42,13 +53,28 @@ node=""
 for h in "$dev"/hidraw/hidraw*; do node="${h##*/}"; done
 [[ -n "$node" && -e "/dev/$node" ]] || { log "no hidraw node under $dev"; exit 1; }
 
+# B4 frame, page 3: 02 38 02 03 01, then slots of <button> <mode> <code> 00 00 00.
+#   24 02 02 05  Home  -> keyboard 02 05 (reported as vendor frames, button 0x24)
+#   25 01 21     Guide -> gamepad Guide (BTN_MODE on the X-Box pad)
+send_page3() {
+	local f='\xb4\x3f\x01\x02\x38\x02\x03\x01\x24\x02\x02\x05\x00\x00\x25\x01\x21' i
+	for (( i = 17; i < 62; i++ )); do f+='\x00'; done
+	f+='\x3f\xb4'
+	# One 64-byte write: a short write to hidraw would send a truncated report.
+	printf '%b' "$f" | dd of="/dev/$node" bs=64 count=1 iflag=fullblock status=none
+}
+
 last=-10
 resend() {
 	local v
 	v="$(<"$dev/button_m1")" || return 1
 	printf '%s\n' "$v" > "$dev/button_m1" || { log "writing $dev/button_m1 failed"; return 1; }
+	# hid-oxp sends its two pages from a work queue, 200 ms apart; page 3 must
+	# land after both.
+	sleep 1
+	send_page3 || { log "writing page 3 to /dev/$node failed"; return 1; }
 	last=$SECONDS
-	log "re-sent button map ($1)"
+	log "re-sent button map and Guide/Home page ($1)"
 }
 
 # hid-oxp schedules its own init 50 ms after binding; let it finish first.

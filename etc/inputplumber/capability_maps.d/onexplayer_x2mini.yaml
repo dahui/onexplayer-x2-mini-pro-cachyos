@@ -17,7 +17,7 @@ id: oxpx2m
 # as a separator so that a button emitting *nothing* could not silently shift the
 # sequence and mislabel its neighbours.
 #
-#   Guide / Xbox   BTN_MODE on the X-Box 360 pad      -- already works, untouched
+#   Guide / Xbox   BTN_MODE on the X-Box 360 pad      -- no rule; on 7.2 needs the watcher
 #   Home           vendor HID, B2 frame, btn id 0x24  -- oxp_hid -> gamepad:Keyboard
 #   Keyboard       KeyLeftCtrl + KeyLeftMeta + KeyO
 #   OneXPlayer     KeyLeftCtrl + KeyLeftMeta + KeyLeftAlt
@@ -25,7 +25,7 @@ id: oxpx2m
 #   Right paddle   vendor HID, B2 frame, btn id 0x23  -- oxp_hid -> RightPaddle1 (R4)
 #
 # The paddles need Linux 7.2's hid-oxp plus the paddle watcher shipped in this
-# package -- see the note at the end. They need no rule here: oxp_hid already
+# package, and on 7.2 so do Guide and Home -- see the note at the end. They need no rule here: oxp_hid already
 # emits them as the Paddle1 pair, which deck-uhid passes through as L4/R4.
 #
 # The two chords are identical to the APEX's oxp8 map ("KB short" and "Turbo"),
@@ -179,17 +179,28 @@ filtered_events: []
 #
 # /usr/lib/onexplayer-x2mini/paddle-watch (oxp-x2mini-paddles.service) watches
 # the vendor hidraw node for the MCU confirming a switch to xinput -- the last
-# step of every hid-oxp init, including the one the driver source runs ~6s after
-# resume (not yet observed across a real suspend) -- and re-sends
+# step of every hid-oxp init, including the one the driver can run after resume
+# (not observed on the first real resume, where the map simply survived) -- and
+# re-sends
 # the map right after it. With that in place the paddles arrive here as B2
 # frames and oxp_hid turns them into LeftPaddle1 / RightPaddle1.
+#
+# Guide and Home: hid-oxp's map covers 18 buttons and not these two. Once the
+# map takes effect -- which is what arms the paddles -- Guide (MCU button 0x25)
+# and Home (0x24) stop reporting on every interface. The watcher follows each
+# map send with a third B4 page carrying their Windows mappings, the one HHD
+# sends to the X2 series: 0x24 -> keyboard 02 05, 0x25 -> gamepad 0x21 (Guide).
+# hid-oxp's own table calls gamepad 0x22 BTN_GUIDE; that value leaves Guide
+# dead. Measured with usbmon plus the deck-uhid output, 2026-09-26: with both
+# pages, Guide, both paddles, Home, Keyboard and OneXPlayer all reach Steam.
 #
 # hid-oxp maps the paddles to KEY_F16 / KEY_F17 in the MCU, but on this unit
 # that keycode is only carried inside the B2 frame (byte 9 = 0x69 / 0x6a); no
 # F16/F17 appears on the keyboard interface, so nothing leaks through as a key.
 #
 # The real fix is in hid-oxp (send the map after the mode cycle for this
-# board). Notes for upstream are in docs/controller.md.
+# board, and include Guide and Home in it). Notes for upstream are in
+# docs/controller.md.
 #
 # Protocol credit: github.com/rmckayfleming/onexplayer-apex-cachyos
 # ---------------------------------------------------------------------------
