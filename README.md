@@ -140,7 +140,8 @@ amd_iommu=off mem_sleep_default=s2idle
 **Re-tested on 7.2.3: still required.** Keeping the IOMMU in passthrough mode
 (`iommu=pt`) and unloading the NPU driver both still freeze; only
 `amd_iommu=off` works. The evidence points at this board's firmware, since the
-APEX shares the board and the fix, and a BIOS update is the realistic way out.
+APEX shares the board and the fix. BIOS 0.22 (07/23/2026) was tested too and
+changes nothing; a later BIOS update is still the realistic way out.
 Details and the test harness: [docs/suspend.md](docs/suspend.md).
 
 On Limine, add the parameters to the `KERNEL_CMDLINE[default]` line in
@@ -155,7 +156,7 @@ do not apply it:** keep the IOMMU and skip suspend.
 |---|---|---|
 | **RGB lighting** | `hid-oxp` registers `oxp:rgb:joystick_rings`, but the controller acknowledges and ignores its commands. This unit is APEX-like here, and the APEX is on the driver's skip list for exactly this reason. | Upstream: add this board to `oxp_hybrid_mcu_list` so the dud device goes away ([notes](docs/controller.md#notes-for-upstream-hid-oxp)). Real control would need a different interface. |
 | **Custom Home mapping** | An InputPlumber 0.78 bug: any rule sourcing Home's capability corrupts the *next* button pressed. Not yet re-tested on 0.81. | Needs an upstream fix. Home's default Steam+X behaviour works regardless, so this is a nice-to-have. |
-| **Suspend costs the NPU** | `amd_iommu=off` is still required on 7.2 (see above). | A BIOS update from OneXPlayer. Re-test after one. |
+| **Suspend costs the NPU** | `amd_iommu=off` is still required on 7.2, BIOS 0.22 included (see above). | A later BIOS update from OneXPlayer. Re-test after one. |
 
 ### Back paddles: working, with a workaround
 

@@ -23,8 +23,12 @@ than measured it says so.
 
 DMI modalias:
 
+BIOS 0.22 (07/23/2026) since 2026-09-26; everything before that date was measured
+on 0.20 (06/10/2026). EC `0.13`, SMU `10.100.6.0` and PM table `0x64010C` did not
+change with it.
+
 ```
-dmi:bvnAmericanMegatrendsInternational,LLC.:bvr0.20:bd06/10/2026:br0.20:efr0.13:svnONE-NETBOOK:pnONEXPLAYERX2MiniPRO:pvrStandard:rvnONE-NETBOOK:rnONEXPLAYERX2MiniPRO:rvrStandard:cvnDefaultstring:ct37:cvrDefaultstring:sku1:pfaONEXPLAYER:
+dmi:bvnAmericanMegatrendsInternational,LLC.:bvr0.22:bd07/23/2026:br0.22:efr0.13:svnONE-NETBOOK:pnONEXPLAYERX2MiniPRO:pvrStandard:rvnONE-NETBOOK:rnONEXPLAYERX2MiniPRO:rvrStandard:cvnDefaultstring:ct37:cvrDefaultstring:sku1:pfaONEXPLAYER:
 ```
 
 ### Two identity claims that matter, and their limits
@@ -779,16 +783,27 @@ real suspend with a 30 s RTC wake:
 That rules out the NPU (the first suspect, since `amd_iommu=off` also disables
 it) and DMA translation (passthrough still freezes). What remains is what only
 `amd_iommu=off` removes, chiefly interrupt remapping, and the likeliest source
-is this board's firmware (BIOS 0.20). The APEX, on the same board, needs the
-same fix, and other Strix Halo machines suspend with the IOMMU on. That is
-inferred, not traced: nothing reaches disk after the pre-sleep sync. A BIOS
-update is the realistic route to having both.
+is this board's firmware. The APEX, on the same board, needs the same fix, and
+other Strix Halo machines suspend with the IOMMU on. That is inferred, not
+traced: nothing reaches disk after the pre-sleep sync.
+
+**BIOS 0.22 (07/23/2026) does not fix it.** Re-tested 2026-09-26 without
+`amd_iommu=off`: the NPU loaded, and a real suspend froze exactly as on 0.20.
+A later BIOS is still the realistic route to having both.
 
 **Testing without a keyboard:** the harness refuses SSH sessions, but a
 detached `systemd-run … CONSOLE_OVERRIDE=1 AUTO=1 WAKE_SECS=30 … none` survives
 the connection dropping, and `/var/log/suspend-test.log` plus the persistent
-journal carry the evidence. Before relaunching after a reconnect, check that log
-for the previous `ATTEMPT` line; the result may simply not have reached you.
+journal carry the evidence.
+
+**A frozen launch gets replayed.** When the machine hangs, the remote session
+never receives the launch's result, and on reconnecting it has re-run the same
+command, freezing the machine again. One BIOS re-test cost several forced
+reboots that way. The harness now refuses to start while the log's last
+`ATTEMPT` has no `SURVIVED`/`REJECTED` after it, logging `BLOCKED` instead;
+`ACK_HANG=1` overrides it deliberately. Do not work around that guard, and do not
+launch a real suspend without `amd_iommu=off` unless the user is at the device
+and has asked for it.
 
 This is a manual bootloader edit — nothing installs or reverts it automatically,
 so anyone adapting this work should be told the trade explicitly rather than
@@ -830,7 +845,7 @@ since 2026-09-26). Status of everything that depended on a kernel version:
 | Rumble | nothing | Works via xpad force feedback; hid-oxp adds a strength setting. |
 | oxpec DMI entry | 7.3 | Upstream (`1b3c0028`, v7.3-rc1). The DKMS package covers 7.2 and older, and skips itself on 7.3+ (§4.2). |
 | ryzen_smu PM table | none (out-of-tree) | Upstream (`b098884`). `ryzen_smu-dkms-git` builds on 7.2 only from `d298366` onward (§4.1). |
-| Dropping `amd_iommu=off` | a firmware (or kernel) fix | **Still required on 7.2.3.** Stock, NPU unloaded and `iommu=pt` all freeze; only `amd_iommu=off` reaches S0i3 (§8). |
+| Dropping `amd_iommu=off` | a firmware (or kernel) fix | **Still required on 7.2.3, BIOS 0.22.** Stock, NPU unloaded and `iommu=pt` all freeze; only `amd_iommu=off` reaches S0i3 (§8). |
 | Custom Home mapping | an InputPlumber fix | Blocked on 0.78 (§7). Not re-tested on 0.81.0; hid-oxp does not change how `0x24` is reported. |
 
 Still ours to upstream: the hid-oxp changes in `docs/controller.md` (paddle

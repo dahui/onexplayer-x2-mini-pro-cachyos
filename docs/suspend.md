@@ -96,6 +96,7 @@ detached systemd unit over SSH, with none of this repo's modules installed:
 | on, translated | unloaded (`modprobe -r`) | freeze — fans stayed running this time |
 | on, passthrough (`iommu=pt`) | loaded | freeze, twice |
 | **off** (`amd_iommu=off`) | cannot load | **works** — `Last S0i3 Status: Success`, 29.49 s of 30 s in S0i3 |
+| on, translated, **BIOS 0.22** | loaded | freeze — the BIOS update changed nothing here |
 
 Each freeze left the journal ending at the harness's pre-sleep sync, with
 nothing after it. The machine needed a forced power-off, and often a second
@@ -112,12 +113,14 @@ What the table rules out:
 - **Strix Halo or the kernel in general.** Other Strix Halo machines suspend on
   the same kernels with the IOMMU on.
 
-The fit is this board's firmware (BIOS 0.20, 06/10/2026): how it describes the
+The fit is this board's firmware (measured on BIOS 0.20, 06/10/2026, and again on
+0.22, 07/23/2026, with the same result): how it describes the
 IOMMU or interrupt routing across the S0i3 transition. The ONEXPLAYER APEX, on
 the same board, needs the same workaround. That is inference, not a trace. The
 hang happens after the last point anything reaches disk, and there is no serial
-console. The realistic route to having both is a BIOS update from OneXPlayer.
-Re-test after one, or after a major kernel bump:
+console. The realistic route to having both is a later BIOS update from
+OneXPlayer; 0.22 was not it. Re-test after one, or after a major kernel bump.
+Be at the device when you do, and read the next section first:
 
 ```bash
 # drop amd_iommu=off from /etc/default/limine
@@ -208,6 +211,23 @@ sudo systemd-run --unit=suspend-real --collect \
 
 `systemd-run` detaches it from the login session, so losing SSH does not kill the
 run.
+
+### A frozen launch gets replayed: the hang guard
+
+A detached launch survives the SSH connection dropping, but the session that
+started it never receives a result when the machine freezes. On reconnecting,
+that session has re-run the same launch, which froze the machine again; one BIOS
+re-test turned into several forced reboots that way.
+
+So the harness refuses to start while the log's last `ATTEMPT` has no `SURVIVED`
+or `REJECTED` after it. It logs `BLOCKED: previous attempt never returned` and
+exits before touching `/sys/power`. Each `ATTEMPT` line also carries the boot ID,
+so a hang is visible as an attempt followed by a new boot. After reading the
+result, rerun deliberately with:
+
+```bash
+sudo ACK_HANG=1 ./suspend/suspend-test.sh none
+```
 
 ### The SSH guard, and why it is written the way it is
 

@@ -109,6 +109,43 @@ if [[ "${CONSOLE_OVERRIDE:-0}" != "1" ]]; then
 	fi
 fi
 
+# --- refuse to repeat a hang ------------------------------------------------
+# An ATTEMPT with no SURVIVED or REJECTED after it means the machine never came
+# back from that attempt. Starting another one blind is how a single hang became
+# four forced reboots: a remote session lost the launch's result when the machine
+# froze, and on reconnecting it replayed the same launch, which froze it again.
+# So an unresolved attempt blocks everything until someone acknowledges it on
+# purpose with ACK_HANG=1.
+unresolved_attempt() {
+	[[ -r "$LOG" ]] || return 1
+	awk -F' [|] ' '
+		$2 ~ /^ATTEMPT /                         { a = $0 }
+		$2 ~ /^(SURVIVED|REJECTED|HANG ACKED) /  { a = "" }
+		END { if (a != "") { print a; exit 0 } exit 1 }
+	' "$LOG"
+}
+
+if prev=$(unresolved_attempt); then
+	if [[ "${ACK_HANG:-0}" != "1" ]]; then
+		record "BLOCKED: previous attempt never returned: ${prev}"
+		cat >&2 <<-EOF
+
+		REFUSING TO RUN: the previous attempt never returned.
+
+		    ${prev}
+
+		The machine most likely hung there and was power-cycled. If this run
+		was started automatically (a reconnect, a retry), that is the point of
+		this check. To run again deliberately, having read the result above:
+
+		    sudo ACK_HANG=1 $0 ${1:-ladder}
+
+		EOF
+		exit 1
+	fi
+	record "HANG ACKED ${prev}"
+fi
+
 # --- make a hang leave visible evidence -------------------------------------
 prepare() {
 	say "Preparing evidence capture"
@@ -175,7 +212,7 @@ attempt() {
 	# Record BEFORE attempting -- if the machine dies here, this line is the
 	# evidence. Flush the journal too, so the kernel's own messages up to this
 	# point survive a hard hang.
-	record "ATTEMPT pm_test=$level $(modstate)"
+	record "ATTEMPT pm_test=$level $(modstate) boot=$(cut -c1-8 /proc/sys/kernel/random/boot_id)"
 	journalctl --sync 2>/dev/null || true
 
 	local start=$SECONDS rc=0
