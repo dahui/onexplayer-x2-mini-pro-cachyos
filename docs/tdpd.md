@@ -157,11 +157,12 @@ PPT slow              47.0W     7.7W
   Use `oxp-tdpd --status` for the real hardware state. Reading the PM table is
   itself an SMU mailbox command inside the driver, not a cheap file read, which
   is why it is not done per request.
-- **Reapply after resume is written but UNVERIFIED.** SMU limits do not survive
-  a power transition, so the daemon watches logind's `PrepareForSleep` and
-  re-sends the last applied limit on wake. That code has never actually run:
-  suspend hangs this machine hard — see [suspend.md](suspend.md). Do not
-  assume this path works.
+- **Reapply after resume works.** SMU limits do not survive a power
+  transition, so the daemon watches logind's `PrepareForSleep` and re-sends the
+  last applied limit on wake. Verified on 7.2.3 (2026-09-26): `system resumed,
+  reapplying TDP limit` at the resume timestamp, and all three limits read back
+  at the 35 W set before sleep. Suspend itself needs the kernel parameter in
+  [suspend.md](suspend.md).
 - **Nothing is restored on exit**, but a pending value is flushed. Stopping the
   daemon leaves the current limit in place; the firmware reapplies its own at
   boot. Resetting on shutdown would override a limit the user deliberately

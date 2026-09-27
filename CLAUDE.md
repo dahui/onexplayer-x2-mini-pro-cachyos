@@ -19,7 +19,7 @@ than measured it says so.
 | CPUID | family `0x1A` (26), model `0x70` (112), stepping 0 |
 | GPU PCI ID | `1002:1586` |
 | Panel | Samsung `AMS881KB01-0` OLED, 1920x1200@144, 12 bpc |
-| Kernel tested | `7.1.6-1-cachyos-deckify`; controller re-measured on `7.2.3-1-cachyos-deckify` |
+| Kernel tested | `7.1.6-1-cachyos-deckify`; everything re-verified on `7.2.3-1-cachyos-deckify` with the v0.2.0 release (2026-09-26) |
 
 DMI modalias:
 
@@ -396,8 +396,9 @@ custom entry unless it scores higher and there is a measured reason.
 (hdr_content_driven)`, and all three atoms read 1. `content_driven` means the
 output switches to PQ only while HDR content is on screen and back to SDR after,
 so an `HDR output disabled` line on leaving a game is expected. SDR brightness
-still works through `holo-priv-write`. Dimming in PQ mode (`software_backlight`)
-has not been checked separately.
+still works through `holo-priv-write`, and the brightness slider also works
+while HDR is active (PQ mode, through the entry's `software_backlight`;
+confirmed 2026-09-26).
 
 **`--hdr-enabled` is NOT required**, despite most guides implying otherwise, and
 an earlier version of this document wrongly called it necessary. Verified with
@@ -599,9 +600,6 @@ After writing any `button_*` attribute by hand, restart
 controller, and moves the paddles out of the vendor frames InputPlumber reads.
 Remap in Steam.
 
-**Its constants confirm what was derived by hand**, and name the rest (checked
-against the mainline source):
-
 **It already binds this controller — no patch needed.** Its device table matches
 `USB_VENDOR_ID_WCH` (`0x1a86`) / `USB_DEVICE_ID_ONEXPLAYER_GEN2` (`0xfe00`),
 which is exactly the interface reverse-engineered above.
@@ -653,8 +651,8 @@ way. But this machine is not on that list, so 7.2 will try to register RGB here.
 
 So the board should be on `oxp_hybrid_mcu_list`, like the APEX it shares a
 board with. As things stand, 7.2 registers an LED device here that does nothing.
-That is a candidate fourth upstream patch. Notes are in `docs/controller.md`,
-along with the init-order fix for the paddles; neither has been sent.
+That is one of the hid-oxp changes noted in `docs/controller.md`, alongside the
+paddle init order and the Guide/Home page; none has been sent yet.
 
 ### Three traps that each cost a debugging round
 

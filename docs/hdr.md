@@ -49,7 +49,7 @@ expected, not a fault.
 Brightness also still works in SDR. `holo-priv-write` granted the backlight at
 login (`commit: 236000 -> …/amdgpu_bl1/brightness`), and Steam moved it directly
 afterwards. Dimming *during* HDR goes through the entry's `software_backlight`
-instead, and has not been checked separately. The pretty name in logs and Steam
+instead, and works too (confirmed 2026-09-26). The pretty name in logs and Steam
 now reads "Lenovo Legion Go 2 OLED", which is cosmetic.
 
 Everything below is the history of how HDR was enabled before that entry

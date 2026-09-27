@@ -40,12 +40,13 @@ Not fixed: **RGB lighting** (the controller ignores `hid-oxp`'s commands) and a
   for the back paddles; everything else also works on 7.1.
 - An AUR helper (`paru` or `yay`) is convenient but not required. See
   [Install](#install).
-- Originally verified end to end on `7.1.6-1-cachyos-deckify` with
-  `steamos-manager 26.4.1` and `inputplumber 0.78.0`. On `7.2.3-1-cachyos-deckify`
-  with `gamescope 3.16.30`, these have been re-verified so far: the controller,
-  suspend (with the parameter), HDR in games, and brightness. The packages
-  (TDP, fans, button mapping with `inputplumber 0.81.0`) have not yet been
-  re-installed and re-tested on 7.2.3.
+- Verified end to end on `7.2.3-1-cachyos-deckify` with the v0.2.0 release,
+  installed by `install.sh`: `steamos-manager 26.4.1`,
+  `inputplumber 0.81.0`, `gamescope 3.16.30`, `ryzen_smu-dkms-git` at `d298366`.
+  That covers TDP (including after resume), fan and charge-limit readings,
+  every button including the paddles, suspend (with the parameter), HDR in
+  games, and brightness in SDR and HDR. Manual fan PWM was measured on
+  `7.1.6-1-cachyos-deckify` and not repeated; the driver code is unchanged.
 
 ## Install
 
